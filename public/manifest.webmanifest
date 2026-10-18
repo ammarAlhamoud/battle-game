@@ -1,0 +1,13 @@
+{
+  "id": "./",
+  "name": "Eightfold — The Art of Command",
+  "short_name": "Eightfold",
+  "description": "Forty tactical battles. Eight ages of civilization. An offline single-player strategy game.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#f4f1e8",
+  "theme_color": "#182c28",
+  "icons": [{ "src": "./art/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
