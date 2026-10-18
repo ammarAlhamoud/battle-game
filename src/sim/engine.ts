@@ -204,7 +204,11 @@ export function applyCommand(state: BattleState, command: Command, content: Game
     }
     case 'ability': {
       if (!validPoint(missionOf(state, content), command)) break;
-      if (state.paused) f.cooldowns[`pending:${command.ability}:${command.x},${command.y}`] = -1;
+      if (state.paused) {
+        // Retarget the one planned cast rather than firing the oldest request on resume.
+        for (const key of Object.keys(f.cooldowns)) if (key.startsWith(`pending:${command.ability}:`)) delete f.cooldowns[key];
+        f.cooldowns[`pending:${command.ability}:${command.x},${command.y}`] = -1;
+      }
       else globalAbility(state, side, command.ability, command, content); break;
     }
     case 'unitAbility': selected.forEach(u => { if (state.paused) u.orders.unshift({ kind: 'ability', x: u.x, y: u.y }); else unitAbility(state, u, content); }); break;
@@ -341,6 +345,14 @@ function updateUnit(state: BattleState, unit: Unit, content: GameContent, dt: nu
   const def = definition(content, unit.defId), mission = missionOf(state, content), order = unit.orders[0];
   unit.cooldown = Math.max(0, unit.cooldown - dt); unit.abilityCooldown = Math.max(0, unit.abilityCooldown - dt); delete unit.targetId;
   if (order?.kind === 'ability') { unitAbility(state, unit, content); unit.orders.shift(); unit.route = []; return; }
+  // An explicit move is a disengagement command. Targetless attack orders advance
+  // with ordinary combat below, then resume their destination when threats clear.
+  if (order?.kind === 'move') {
+    if (moveUnit(state, unit, formationGoal(state, unit, order, content), content, dt)) {
+      unit.status = 'idle'; unit.orders.shift(); unit.route = [];
+    }
+    return;
+  }
   const range = Math.max(.8, def.range + terrainModifiers(terrainAt(mission.map, unit.x, unit.y)).range);
   const enemies = state.units.filter(e => e.owner !== unit.owner && e.hp > 0 && unitVisible(state, e, unit.owner, content));
   let target = order?.target ? enemies.find(e => e.id === order.target) : undefined;

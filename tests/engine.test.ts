@@ -158,10 +158,78 @@ test('global abilities cost resources, respect unlocks/cooldowns/vision and paus
 
 test('queued plans survive self-defense and complete movement; JSON restore continues deterministically including AI', () => {
   const { state, content } = fixture(); const u = own(state), e = own(state, 1); u.x = 8; u.y = 12; e.x = 9; e.y = 12; e.hp = 1;
-  applyCommand(state, { type: 'order', side: 0, ids: [u.id], order: { kind: 'move', x: 12, y: 12 } }, content); stepBattle(state, content);
-  assert.equal(u.orders[0]?.kind, 'move'); ticks(state, content, 40); assert.ok(u.x > 10);
+  applyCommand(state, { type: 'order', side: 0, ids: [u.id], order: { kind: 'attack', x: 12, y: 12 } }, content); stepBattle(state, content);
+  assert.equal(u.orders[0]?.kind, 'attack'); ticks(state, content, 40); assert.ok(u.x > 10);
   state.aiSides = [0, 1]; const restored = JSON.parse(JSON.stringify(state)) as BattleState;
   ticks(state, content, 50); ticks(restored, content, 50); assert.deepEqual(restored, state);
+});
+
+test('explicit move disengages under threat for either faction without opportunistic attacks', () => {
+  for (const side of [0, 1] as const) {
+    const { state, content } = fixture();
+    const soldier = own(state, side), enemy = own(state, side === 0 ? 1 : 0);
+    soldier.x = 10; soldier.y = 10; enemy.x = 11; enemy.y = 10;
+    enemy.orders = [{ kind: 'defend', x: enemy.x, y: enemy.y }];
+    applyCommand(state, { type: 'order', side, ids: [soldier.id], order: { kind: 'attack', x: enemy.x, y: enemy.y, target: enemy.id } }, content);
+    applyCommand(state, { type: 'order', side, ids: [soldier.id], order: { kind: 'move', x: 6, y: 10 } }, content);
+    ticks(state, content, 12);
+    assert.ok(soldier.x < 8, 'the move makes immediate progress away from a nearby enemy');
+    assert.ok(soldier.hp < 100, 'retreat does not grant invulnerability');
+    assert.equal(enemy.hp, 100, 'a moving soldier does not stop to trade attacks');
+    assert.equal(soldier.orders[0]?.kind, 'move');
+    assert.equal(state.factions[side].damageDealt, 0);
+  }
+});
+
+test('targetless attack acquires a nearby enemy and resumes its queued destination after combat', () => {
+  const { state, content } = fixture(); const soldier = own(state), enemy = own(state, 1);
+  soldier.x = 8; soldier.y = 12; enemy.x = 11; enemy.y = 12; enemy.hp = 1;
+  enemy.orders = [{ kind: 'defend', x: enemy.x, y: enemy.y }];
+  applyCommand(state, { type: 'order', side: 0, ids: [soldier.id], order: { kind: 'attack', x: 16, y: 12 } }, content);
+  applyCommand(state, { type: 'order', side: 0, ids: [soldier.id], order: { kind: 'move', x: 16, y: 15 }, append: true }, content);
+  stepBattle(state, content);
+  assert.ok(soldier.x > 8, 'attack-move closes on a visible enemy outside weapon range');
+  for (let i = 0; i < 30 && state.units.some(unit => unit.id === enemy.id); i++) stepBattle(state, content);
+  assert.equal(state.factions[0].kills['e1-frontline'], 1);
+  assert.equal(soldier.orders[0]?.kind, 'attack', 'combat preserves the original destination');
+  assert.equal(soldier.orders[1]?.kind, 'move', 'combat preserves later queued waypoints');
+  ticks(state, content, 75);
+  assert.ok(Math.hypot(soldier.x - 16, soldier.y - 15) < .6, 'the advance and the next waypoint both finish');
+  assert.equal(soldier.orders.length, 0);
+});
+
+test('defending soldiers still hold their position and fight enemies in range', () => {
+  const { state, content } = fixture(); const soldier = own(state), enemy = own(state, 1);
+  soldier.x = 10; soldier.y = 10; enemy.x = 11; enemy.y = 10;
+  soldier.orders = [{ kind: 'defend', x: 10, y: 10 }]; enemy.orders = [{ kind: 'defend', x: 11, y: 10 }];
+  ticks(state, content, 10);
+  assert.equal(soldier.x, 10); assert.equal(soldier.y, 10);
+  assert.ok(enemy.hp < 100); assert.ok(soldier.hp < 100);
+  assert.equal(soldier.orders[0]?.kind, 'defend');
+});
+
+test('retargeting a paused global ability replaces its old plan and charges once on resume', () => {
+  const { mission, content } = fixture(); const state = createBattle(mission, content, ['recon', 'rally'], []);
+  const faction = state.factions[0], funds = faction.resources;
+  applyCommand(state, { type: 'pause', value: true }, content);
+  applyCommand(state, { type: 'ability', side: 0, ability: 'recon', x: 5, y: 5 }, content);
+  applyCommand(state, { type: 'ability', side: 0, ability: 'rally', x: 3, y: 13 }, content);
+  applyCommand(state, { type: 'ability', side: 0, ability: 'recon', x: 15, y: 10 }, content);
+  applyCommand(state, { type: 'ability', side: 0, ability: 'recon', x: 15, y: 10 }, content);
+  assert.deepEqual(Object.keys(faction.cooldowns).filter(key => key.startsWith('pending:')).sort(), ['pending:rally:3,13', 'pending:recon:15,10']);
+  ticks(state, content, 20);
+  assert.equal(faction.resources, funds); assert.equal(state.time, 0);
+  const restored = JSON.parse(JSON.stringify(state)) as BattleState;
+  for (const battle of [state, restored]) {
+    applyCommand(battle, { type: 'pause', value: false }, content); stepBattle(battle, content);
+    assert.equal(battle.factions[0].resources, funds - RULES.abilityCosts.recon - RULES.abilityCosts.rally);
+    assert.equal(battle.factions[0].cooldowns['reveal:5,5'], undefined);
+    assert.ok(battle.factions[0].cooldowns['reveal:15,10']! > 0);
+    assert.ok(battle.factions[0].cooldowns.recon! > 0); assert.ok(battle.factions[0].cooldowns.rally! > 0);
+    assert.equal(Object.keys(battle.factions[0].cooldowns).some(key => key.startsWith('pending:')), false);
+    assert.equal(battle.events.filter(event => event.kind === 'ability' && event.text === 'recon').length, 1);
+  }
+  assert.deepEqual(restored, state, 'save restoration retains the single retargeted cast');
 });
 
 test('terrain cover, role counters, armor formations and damage skills produce different combat outcomes', () => {
