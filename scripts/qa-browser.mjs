@@ -183,9 +183,14 @@ try {
   await page.getByRole('button', { name: 'Save & return to campaign', exact: true }).click();
 
   const fixture = new URL('late-victory.json', output).pathname;
+  const importedFixture = JSON.parse(await readFile(fixture, 'utf8'));
+  const fixtureClock = `${String(Math.floor(importedFixture.battle.time / 60)).padStart(2, '0')}:${String(Math.floor(importedFixture.battle.time % 60)).padStart(2, '0')}`;
   await page.locator('input[type="file"]').setInputFiles(fixture);
-  await waitFor(async () => /01:11/.test(await page.getByTestId('resume-battle').innerText()), 'late battle import did not finish');
+  await waitFor(async () => (await page.getByTestId('resume-battle').innerText()).includes(fixtureClock), 'late battle import did not finish');
   await page.getByTestId('resume-battle').click();
+  await page.waitForFunction(() => !!document.querySelector('.results-card') || !!document.querySelector('#battle-viewport[data-renderer=ready]'));
+  const importedTutorial = page.getByRole('button', { name: 'Skip', exact: true });
+  if (await importedTutorial.count()) await importedTutorial.click();
   await page.getByRole('heading', { name: 'Ground gained.', exact: true }).waitFor({ timeout: 15000 });
   assert.ok(await page.locator('.results-page').evaluate(async element => {
     const source = getComputedStyle(element, '::before').backgroundImage.match(/url\("([^\"]+)"\)/)?.[1];

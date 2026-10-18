@@ -14,7 +14,9 @@
     "test:art": "node scripts/qa-art.mjs",
     "test:storage": "node scripts/qa-storage.mjs",
     "test:campaign": "node scripts/simulate-campaign.mjs",
-    "benchmark": "node --expose-gc scripts/benchmark.mjs"
+    "benchmark": "node --expose-gc scripts/benchmark.mjs",
+    "test:tactics": "node scripts/qa-tactics.mjs",
+    "test:runtime": "node scripts/qa-runtime.mjs"
   },
   "dependencies": {
     "phaser": "3.90.0"
