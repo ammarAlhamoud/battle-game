@@ -50,4 +50,5 @@ export const proMessagesAr: Record<string, string> = {
   'A + left-click': 'A + النقر الأيسر', 'Advance and engage; normal Move disengages': 'التقدم والاشتباك؛ أمر الحركة العادي ينسحب من القتال',
   'Target + Escape': 'الاستهداف + Escape', 'Cancel targeting without spending supplies': 'إلغاء الاستهداف دون إنفاق الإمدادات',
   'ATTACK INTERVAL': 'زمن الهجوم', 'BASE DPS': 'الضرر في الثانية', 'CAPTURE POWER': 'قوة الاستيلاء',
+  'Base statistics before research, terrain and formation effects.': 'إحصاءات أساسية قبل تأثيرات الأبحاث والتضاريس والتشكيلات.',
 };

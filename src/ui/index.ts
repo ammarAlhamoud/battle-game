@@ -1,15 +1,20 @@
-import type { BattleRenderer, BattleState, Campaign, Command, Formation, MissionDef, Order, Selection, SkillDef, Unit, UnitDef, Vec } from '../contracts';
+import type { BattleRenderer, BattleState, Campaign, Command, Formation, MissionDef, Order, Selection, SkillDef, TacticalTarget, Unit, UnitDef, Vec } from '../contracts';
 import type { GameUI, ResultsData, UIOptions } from '../ui-contract';
 import { createRenderer } from '../render/index';
 import { getGraphicsQuality, setGraphicsQuality, type GraphicsQuality } from '../render/quality';
 import { unitVisible, capacity, usage, unlockedUnits, RULES } from '../sim/engine';
+import { checkTarget } from '../sim/targeting';
+import { terrainAt, terrainModifiers } from '../sim/navigation';
 import { translate, getLanguage, setLanguage, type Language } from '../i18n/index';
 import { icon as svgIcon, type IconName } from './icons';
 import { skillArt } from './skill-art';
 import { unitPortrait, buildingPortrait } from './portraits';
+import { createBattleIntel, BATTLE_INTEL_AR, type BattleIntel } from './battle-intel';
 import './style.css';
 import './art.css';
 import './skill-tree.css';
+import './command.css';
+import './battle-intel.css';
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
 const SHORT_ERAS = ['Origins', 'Bronze', 'Classical', 'Medieval', 'Gunpowder', 'Industrial', 'Modern', 'Space'];
@@ -76,6 +81,10 @@ export function mountUI(options: UIOptions): GameUI {
   let productionExpanded = false;
   let tutorialStep = 0;
   let tutorialOpen = false;
+  let tutorialOwnsPause = false;
+  let targetMode: TacticalTarget | null = null;
+  let targetingBar: HTMLElement | null = null;
+  let battleIntel: BattleIntel | null = null;
   let panelFingerprint = '';
   let top: HTMLElement | null = null;
   let contextual: HTMLElement | null = null;
@@ -95,13 +104,16 @@ export function mountUI(options: UIOptions): GameUI {
     setLanguage(language); document.documentElement.lang = language; document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
     document.title = language === 'ar' ? 'EIGHTFOLD — فن القيادة' : 'Eightfold — The Art of Command';
     localizeTree(root); localizeTree(toasts);
+    battleIntel?.relocalize();
     for (const control of root.querySelectorAll<HTMLElement>('[data-language]')) { const checked = control.dataset.language === language; control.classList.toggle('selected', checked); control.setAttribute('aria-checked', String(checked)); control.tabIndex = checked ? 0 : -1; }
     if (save) { campaign.language = language; options.onLanguageChange(language); }
   }
   applyLanguage(getLanguage());
   const notify = (message: string) => {
     if (destroyed) return;
-    const toast = element('div', 'toast', message); append(toasts, toast);
+    if ([...toasts.children].some(item => (item as HTMLElement).dataset.message === message)) return;
+    const toast = element('div', 'toast', message); toast.dataset.message = message; append(toasts, toast);
+    while (toasts.children.length > 3) toasts.firstElementChild?.remove();
     window.setTimeout(() => toast.remove(), 5000);
   };
   const send = (command: Command) => options.onCommand(command);
@@ -115,6 +127,17 @@ export function mountUI(options: UIOptions): GameUI {
   };
   const nextMission = () => content.missions.find(item => missionUnlocked(item) && !campaign.records[item.id]?.victory) ?? content.missions[content.missions.length - 1]!;
 
+  function requestStart(missionId: string, resume: boolean) {
+    if (!resume && savedBattle && !savedBattle.ended) {
+      const dialog = openModal('Replace the saved battle?');
+      append(dialog, element('p', 'modal-copy', 'Starting a new attempt replaces your unfinished battle. Campaign records and knowledge are kept.'),
+        button('Resume saved battle', () => { const id = savedBattle!.missionId; closeModal(); options.onStart(id, true); }, 'primary'),
+        button('Replace and start', () => { closeModal(); options.onStart(missionId, false); }, 'secondary'),
+        button('Keep saved battle', closeModal, 'text-button'));
+      return;
+    }
+    options.onStart(missionId, resume);
+  }
   function run(action: () => Promise<void>, success?: string) {
     action().then(() => { if (success) notify(success); }).catch(error => notify(error instanceof Error ? error.message : 'That action could not be completed.'));
   }
@@ -130,12 +153,14 @@ export function mountUI(options: UIOptions): GameUI {
   function closeModal() {
     const trigger=modalTrigger;const triggerId=trigger?.dataset.testid;
     if(modalClose)modalClose();modal?.remove();modal=null;modalClose=null;modalTrigger=null;
+    renderer?.setInputEnabled?.(true);
     if(campaignDirty&&screen==='campaign'){campaignDirty=false;renderCampaign();}
     if(trigger?.isConnected)trigger.focus();else if(triggerId)root.querySelector<HTMLElement>(`[data-testid="${triggerId}"]`)?.focus();
   }
   function openModal(name: string, className = '') {
     closeModal();
     modalTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    renderer?.setInputEnabled?.(false);
     modal = element('div', 'modal-backdrop');
     const dialog = element('section', `modal ${className}`); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); localAttribute(dialog, 'aria-label', name);
     const header = element('header', 'modal-header'); append(header, element('h2', '', name), withIcon(button('', closeModal, 'icon-button', 'Close (Escape)'), 'close'));
@@ -187,9 +212,9 @@ export function mountUI(options: UIOptions): GameUI {
     const dialog = openModal('A field guide to command', 'guide-modal');
     append(dialog, element('p', 'modal-copy', 'Capture the enemy main stronghold. Earn supplies from defeated units and first captures; there is no passive income. Your opponent follows the same rules.'));
     const grid = element('div', 'guide-grid');
-    const bindings = [['Left-click / drag', 'Select a soldier, stronghold or group'], ['Right-click', 'Move, attack, capture or defend'], ['Shift + right-click', 'Append an order to your plan'], ['Spacebar', 'Pause both armies; keep planning'], ['W A S D / arrows', 'Pan the map'], ['Wheel / middle drag', 'Zoom / pan the map'], ['Ctrl + 1–9', 'Assign selected soldiers to a group'], ['Shift + 1–9', 'Add soldiers to a control group'], ['1–9', 'Recall a control group'], ['F / S / H', 'Cycle formation / stop / focus home'], ['Q / R / T / V', 'Unit ability / rally / recon / volley'], ['Escape', 'Close a panel or clear selection']];
+    const bindings = [['Left-click / drag', 'Select a soldier, stronghold or group'], ['Right-click', 'Move, attack, capture or defend'], ['Shift + right-click', 'Append an order to your plan'], ['A + left-click', 'Advance and engage; normal Move disengages'], ['Target + Escape', 'Cancel targeting without spending supplies'], ['Spacebar', 'Pause both armies; keep planning'], ['W A S D / arrows', 'Pan the map'], ['Wheel / middle drag', 'Zoom / pan the map'], ['Ctrl + 1–9', 'Assign selected soldiers to a group'], ['Shift + 1–9', 'Add soldiers to a control group'], ['1–9', 'Recall a control group'], ['F / S / H', 'Cycle formation / stop / focus home'], ['Q / R / T / V', 'Unit ability / rally / recon / volley'], ['Escape', 'Close a panel or clear selection']];
     for (const [key, action] of bindings) append(grid, element('kbd', '', key), element('span', '', action));
-    append(dialog, grid, button('Replay field tutorial', () => { closeModal(); tutorialStep = 0; tutorialOpen = true; campaign.tutorial = true; if (screen === 'battle') renderTutorial(); else notify('The field tutorial will begin when you enter a battle.'); }, 'secondary'));
+    append(dialog, grid, button('Replay field tutorial', () => { closeModal(); tutorialStep = 0; tutorialOpen = true; campaign.tutorial = true; if (screen === 'battle') { tutorialOwnsPause = !state?.paused; send({ type: 'pause', value: true }); renderTutorial(); } else notify('The field tutorial will begin when you enter a battle.'); }, 'secondary'));
   }
   function utilityBar() {
     const bar = element('div', 'utility-bar');
@@ -203,6 +228,8 @@ export function mountUI(options: UIOptions): GameUI {
     return bar;
   }
   function renderCampaign() {
+    cancelTarget();
+    battleIntel?.destroy(); battleIntel = null;
     renderer?.destroy(); renderer = null; state = null; mission = null; screen = 'campaign'; closeModal();
     root.replaceChildren(); root.classList.remove('in-battle');
     const shell = element('div', 'campaign-shell');
@@ -240,11 +267,11 @@ export function mountUI(options: UIOptions): GameUI {
     append(featureCopy, element('p', 'eyebrow hero-eyebrow', `THE ${ROMAN[eraIndex]} AGE  /  ${era.years}`), element('h1', '', era.name), element('p', 'era-subtitle', era.subtitle), element('p', 'era-description', era.description));
     const missionTeaser = element('div', 'next-mission');
     append(missionTeaser, label(missionUnlocked(selected) ? (campaign.records[selected.id]?.victory ? 'RETURN TO THE FIELD' : 'YOUR NEXT COMMAND') : 'THE NEXT CHAPTER', 'eyebrow'), element('h3', '', selected.name));
-    const start = button(missionUnlocked(selected) ? `${campaign.records[selected.id]?.victory ? 'Replay' : 'Begin'} battle` : 'Complete the previous age to unlock', () => options.onStart(selected.id, false), 'primary'); start.disabled = !missionUnlocked(selected); start.dataset.testid = 'start-battle';
+    const start = button(missionUnlocked(selected) ? `${campaign.records[selected.id]?.victory ? 'Replay' : 'Begin'} battle` : 'Complete the previous age to unlock', () => requestStart(selected.id, false), 'primary'); start.disabled = !missionUnlocked(selected); start.dataset.testid = 'start-battle';
     start.append(svgIcon('arrow','directional'));append(missionTeaser, start);
     if (savedBattle && !savedBattle.ended) {
       const resumeMission = content.missions.find(item => item.id === savedBattle?.missionId);
-      if (resumeMission) { const resume = button(`↶ Resume ${resumeMission.name} · ${clock(savedBattle.time)}`, () => options.onStart(resumeMission.id, true), 'resume-link'); resume.dataset.testid = 'resume-battle'; append(missionTeaser, resume); }
+      if (resumeMission) { const resume = button(`↶ Resume ${resumeMission.name} · ${clock(savedBattle.time)}`, () => requestStart(resumeMission.id, true), 'resume-link'); resume.dataset.testid = 'resume-battle'; append(missionTeaser, resume); }
     }
     append(featureCopy, missionTeaser);
     const art = element('div', 'feature-art');
@@ -275,22 +302,23 @@ export function mountUI(options: UIOptions): GameUI {
     append(facts, stat('STARTING SUPPLIES', number(item.resources[0])), stat('BASE CAPACITY', `${item.capacity}`), stat('TARGET TIME', clock(item.parTime)), stat('BEST SCORE', record ? number(record.bestScore) : '—'));
     append(dialog, facts, element('p', 'objective-note', 'OBJECTIVE · Capture the enemy main stronghold.'),element('p','mission-concept',item.concept));
     const roster=element('div','briefing-roster');for(const unit of content.eras[item.era]!.units.filter(unit=>item.roster.includes(unit.role)&&(!unit.skill||campaign.skills.includes(unit.skill)))){const chip=element('span','roster-chip');localAttribute(chip,'title',unit.description);append(chip,svgIcon(unit.role),label(unit.name));append(roster,chip);}append(dialog,roster);
-    if (unlocked) append(dialog, button(record?.victory ? 'Replay battle →' : 'Take command →', () => { closeModal(); options.onStart(item.id, false); }, 'primary'));
+    if (unlocked) append(dialog, button(record?.victory ? 'Replay battle →' : 'Take command →', () => { closeModal(); requestStart(item.id, false); }, 'primary'));
     else append(dialog, element('p', 'locked-note', 'Win the previous battle to unlock this field. You can inspect every era while you progress.'));
   }
   function stat(name: string, value: string) { return append(element('div', 'stat'), element('small', '', name), element('strong', '', value)); }
 
   function beginBattle(missionId: string) {
     const found = content.missions.find(item => item.id === missionId); if (!found) return notify('This mission is unavailable.');
+    battleIntel?.destroy(); battleIntel = null;
     renderer?.destroy(); closeModal(); root.replaceChildren(); root.classList.add('in-battle');
-    mission = found; state = null; screen = 'battle'; selection = { units: [], stronghold: null }; panelFingerprint = ''; groups.clear(); productionExpanded = false;
+    mission = found; state = null; screen = 'battle'; targetMode = null; tutorialOwnsPause = campaign.tutorial; selection = { units: [], stronghold: null }; panelFingerprint = ''; groups.clear(); productionExpanded = false;
     battleRoot = element('main', 'battle-shell');
     top = element('header', 'battle-top');
     append(top, brand(true));
     const missionHeading = element('div', 'battle-mission'); append(missionHeading, element('small', '', `${ROMAN[found.era]} / ${String(found.index + 1).padStart(2, '0')}`), element('strong', '', found.name)); append(top, missionHeading);
     const telemetry = element('div', 'telemetry');
     for (const [key, caption] of [['supplies', 'SUPPLIES'], ['army', 'ARMY'], ['score', 'SCORE'], ['time', 'TIME']]) { const item = stat(caption!, '—'); item.dataset.stat = key; item.prepend(svgIcon(key==='time'?'clock':key as IconName)); append(telemetry, item); }
-    pauseButton = withIcon(button('Pause', () => { if (state) send({ type: 'pause', value: !state.paused }); }, 'pause-button', 'Tactical pause (Space)'), 'pause');
+    pauseButton = withIcon(button('Pause', () => { if (state) { tutorialOwnsPause = false; send({ type: 'pause', value: !state.paused }); } }, 'pause-button', 'Tactical pause (Space)'), 'pause');
     pauseButton.dataset.testid = 'pause';
     const battleSettings=withIcon(button('',settings,'icon-button','Settings'),'settings');battleSettings.dataset.testid='battle-settings';
     append(top, telemetry, pauseButton, withIcon(button('Civilization', openSkills, 'quiet-button'),'tree'), battleSettings,withIcon(button('', battleMenu, 'icon-button', 'Battle menu'),'menu'));
@@ -302,36 +330,45 @@ export function mountUI(options: UIOptions): GameUI {
     append(minimapWrap, minimap, element('div', 'minimap-legend', '● YOUR ARMY   ● ENEMY IN SIGHT   ◇ STRONGHOLD'));
     const planning=element('div','pause-indicator');append(planning,svgIcon('pause'),label('TACTICAL PAUSE · PLAN FREELY'));planning.hidden=true;
     const mapControls=element('div','map-controls');append(mapControls,withIcon(button('',selectHome,'map-control','Main stronghold'),'home'),withIcon(button('',()=>{if(!state)return;selection={units:state.units.filter(unit=>unit.owner===0).map(unit=>unit.id),stronghold:null};renderer?.setSelection(selection);panelFingerprint='';renderContext();},'map-control','Select all soldiers'),'select'),withIcon(button('',help,'map-control','Battle controls'),'guide'));
-    append(viewport,planning,mapControls);append(battleRoot, top, viewport, contextual, minimapWrap); append(root, battleRoot);
+    battleIntel = createBattleIntel(content, found, source => getLanguage() === 'ar' ? BATTLE_INTEL_AR[source] ?? translate(source) : source, point => renderer?.focus(point.x, point.y));
+    append(viewport,planning,mapControls,battleIntel.element);append(battleRoot, top, viewport, contextual, minimapWrap); append(root, battleRoot);
     renderer = createRenderer({ parent: viewport, content, mission: found, onSelect: (incoming, additive) => {
       selection = { units: additive ? [...new Set([...selection.units, ...incoming.units])] : incoming.units, stronghold: incoming.stronghold };
       if (selection.stronghold) selection.units = [];
       renderer?.setSelection(selection); panelFingerprint = ''; renderContext();
-    }, onOrder: (order, additive) => { if (selection.units.length) send({ type: 'order', side: 0, ids: [...selection.units], order, append: additive }); } });
+    }, onOrder: (order, additive) => { if (selection.units.length) send({ type: 'order', side: 0, ids: [...selection.units], order, append: additive }); }, onTarget: (point, additive) => commitTarget(point, additive) });
+    viewport.addEventListener('contextmenu', event => { if (targetMode) { event.preventDefault(); cancelTarget(); } });
     viewport.addEventListener('camera-move', drawMinimap);
     tutorialOpen = tutorialOpen || campaign.tutorial; renderTutorial(); renderContext();
   }
   function battleMenu() {
     const dialog = openModal('Command desk', 'battle-menu');
     const concede = button('Concede battle', confirmConcede, 'secondary'); concede.disabled = !state || state.ended; concede.dataset.testid = 'concede-battle';
-    append(dialog, element('p', 'modal-copy', 'The field continues while this menu is open. Use tactical pause whenever you need time to think.'), withIcon(button('Field guide & controls', help, 'secondary'),'guide'),withIcon(button('Settings',settings,'secondary'),'settings'),withIcon(button('Save now', () => run(options.onSave, 'Battle saved.'), 'secondary'),'check'), withIcon(button('Export complete save', () => run(options.onExport), 'secondary'),'upload'), concede, button('Return to campaign', confirmLeave, 'primary'));
+    append(dialog, element('p', 'modal-copy', 'The field continues while this menu is open. Use tactical pause whenever you need time to think.'), withIcon(button('Field guide & controls', help, 'secondary'),'guide'),withIcon(button('Settings',settings,'secondary'),'settings'),withIcon(button('Save now', () => run(options.onSave), 'secondary'),'check'), withIcon(button('Export complete save', () => run(options.onExport), 'secondary'),'upload'), concede, button('Return to campaign', confirmLeave, 'primary'));
+  }
+  function finishTutorial() {
+    tutorialOpen = false; campaign.tutorial = false;
+    if (tutorialOwnsPause && state?.paused) send({ type: 'pause', value: false });
+    tutorialOwnsPause = false; run(options.onSave);
   }
   function renderTutorial() {
+    battleRoot?.classList.toggle('in-tutorial', tutorialOpen);
     battleRoot?.querySelector('.tutorial-card')?.remove(); if (!battleRoot || !tutorialOpen || screen !== 'battle') return;
     const tutorial = TUTORIALS[tutorialStep]!;
     const card = element('aside', 'tutorial-card');
-    const header = element('div', 'tutorial-header'); append(header, label(tutorial.key, 'eyebrow'), button('Skip', () => { tutorialOpen = false; campaign.tutorial = false; run(options.onSave); renderTutorial(); }, 'text-button'));
+    const header = element('div', 'tutorial-header'); append(header, label(tutorial.key, 'eyebrow'), button('Skip', () => { finishTutorial(); renderTutorial(); }, 'text-button'));
     append(card, header, element('h3', '', tutorial.name), element('p', '', tutorial.text));
     if (mission?.tutorial) append(card, element('p', 'mission-tutorial-note', mission.tutorial));
     const controls = element('div', 'tutorial-controls'); append(controls, label(`${tutorialStep + 1} / ${TUTORIALS.length}`, 'eyebrow'), button(tutorialStep === TUTORIALS.length - 1 ? 'Take command ✓' : 'Next →', () => {
-      if (tutorialStep < TUTORIALS.length - 1) tutorialStep++; else { tutorialOpen = false; campaign.tutorial = false; run(options.onSave); }
+      if (tutorialStep < TUTORIALS.length - 1) tutorialStep++; else { finishTutorial(); }
       renderTutorial();
     }, 'text-button')); append(card, controls); append(battleRoot, card);
   }
   function setState(next: BattleState) {
     if (screen !== 'battle') return; state = next;
+    if (targetMode && targetMode.kind === 'attack' && !next.units.some(u => u.owner === 0 && targetMode!.ids.includes(u.id))) cancelTarget();
     selection.units = selection.units.filter(id => next.units.some(unit => unit.id === id && unit.owner === 0));
-    renderer?.setState(next); renderer?.setSelection(selection);
+    renderer?.setState(next); renderer?.setSelection(selection); battleIntel?.update(next);
     const values: Record<string, string> = { supplies: number(next.factions[0].resources), army: `${usage(next, 0, content)} / ${capacity(next, 0, content)}`, score: number(next.factions[0].score), time: clock(next.time) };
     for (const [key, value] of Object.entries(values)) { const item = top?.querySelector(`[data-stat="${key}"] strong`); if (item) setText(item, value); }
     if (pauseButton) {
@@ -414,6 +451,7 @@ export function mountUI(options: UIOptions): GameUI {
     const heading = panelHeading(selected.length === 1 ? def.name : `${selected.length} soldiers selected`, 'FIELD COMMAND', unitSummary(selected));
     heading.classList.add('illustrated-heading');heading.prepend(unitPortrait(def));
     heading.querySelector('p')!.dataset.health = '';
+    append(heading, button('Unit dossier', () => showUnitDossier(def), 'text-button'));
     append(heading, button('Clear ×', () => { selection = { units: [], stronghold: null }; renderer?.setSelection(selection); renderContext(); }, 'text-button')); append(contextual, heading);
     const body = element('div', 'unit-panel-body');
     const commands = element('div', 'unit-actions');
@@ -426,7 +464,7 @@ export function mountUI(options: UIOptions): GameUI {
     append(commands, label('FORMATION  /  F TO CYCLE', 'eyebrow'), formationRow);
     const actionRow = element('div', 'action-row');
     const unitAbilityButton = withIcon(button(lead.abilityCooldown > 0 ? `Ability ${Math.ceil(lead.abilityCooldown)}s` : 'Unit ability · Q', () => send({ type: 'unitAbility', side: 0, ids: [...selection.units] }), 'small-button', 'Activate selected soldiers: 4 supplies each, 18 second cooldown'),'target'); unitAbilityButton.dataset.unitAbility = '';
-    append(actionRow, withIcon(button('Stop · S', () => send({ type: 'editOrders', side: 0, ids: [...selection.units], orders: [] }), 'small-button'),'pause'), withIcon(button('Defend here', () => { const unit = ownUnits()[0]; if (unit) send({ type: 'order', side: 0, ids: [...selection.units], order: { kind: 'defend', x: unit.x, y: unit.y } }); }, 'small-button'),'defend'), unitAbilityButton);
+    append(actionRow, withIcon(button('Attack-move · A', () => startTarget('attack'), 'small-button'), 'target'), withIcon(button('Stop · S', () => send({ type: 'editOrders', side: 0, ids: [...selection.units], orders: [] }), 'small-button'),'pause'), withIcon(button('Defend here', () => { const unit = ownUnits()[0]; if (unit) send({ type: 'order', side: 0, ids: [...selection.units], order: { kind: 'defend', x: unit.x, y: unit.y } }); }, 'small-button'),'defend'), unitAbilityButton);
     append(commands, actionRow);
     const tactical = element('div', 'action-row');
     for (const ability of ['rally', 'recon', 'volley'] as const) {
@@ -472,31 +510,107 @@ export function mountUI(options: UIOptions): GameUI {
     form.onsubmit = event => { event.preventDefault(); const unit = state?.units.find(item => item.id === ids[0]); if (!unit) return closeModal(); const orders = unit.orders.map(item => ({ ...item })); const order: Order = { kind: kind.value as Order['kind'], x: Number(x.value), y: Number(y.value) }; if (order.kind === 'capture') { const target = state?.strongholds.find(item => Math.hypot(item.x - order.x, item.y - order.y) < 3); if (target) { order.target = target.id; order.x = target.x; order.y = target.y; } } if (index === null) orders.push(order); else orders[index] = order; send({ type: 'editOrders', side: 0, ids, orders }); closeModal(); };
     append(dialog, form);
   }
+  function cancelTarget() {
+    targetMode = null; renderer?.setTargeting?.(null); targetingBar?.remove(); targetingBar = null;
+    battleRoot?.classList.remove('is-targeting');
+  }
+  function startTarget(kind: TacticalTarget['kind']) {
+    if (!state || !mission) return;
+    if (kind === 'attack' && !selection.units.length) return;
+    if ((kind === 'tower' || kind === 'barrier') && !ownUnits().some(u => definitions.get(u.defId)?.role === 'engineer')) return notify('Select an engineer to build.');
+    cancelTarget(); targetMode = { kind, ids: [...selection.units] };
+    renderer?.setTargeting?.(targetMode); battleRoot?.classList.add('is-targeting');
+    const bar = element('section', 'targeting-bar'); bar.dataset.testid = 'targeting-bar'; localAttribute(bar, 'aria-label', 'Targeting controls');
+    const copy = element('div', 'targeting-copy');
+    append(copy, element('strong', '', kind === 'attack' ? 'Attack-move · A' : kind === 'barrier' || kind === 'tower' ? `Build ${kind}` : titleCase(kind)),
+      element('span', '', kind === 'attack' ? 'Click the field to advance and engage. Shift adds to your plan.' : kind === 'barrier' || kind === 'tower' ? 'Choose a visible, clear cell. Your engineer will travel there to build.' : 'Click the field to choose the area of effect.'));
+    const origin = ownUnits()[0] ?? state.strongholds.find(s => s.owner === 0 && s.kind === 'main')!;
+    const preview = checkTarget(state, content, targetMode, origin);
+    if (kind !== 'attack') append(copy, element('small', 'target-cost', `${preview.cost} supplies`));
+    const feedback = element('span', 'target-feedback'); feedback.dataset.targetFeedback = ''; feedback.setAttribute('role', 'status');
+    const actions = element('div', 'targeting-actions');
+    const coordinates = button('Enter coordinates', targetCoordinates, 'small-button'); coordinates.dataset.testid = 'target-coordinates';
+    const cancel = button('Cancel · Esc', cancelTarget, 'small-button'); cancel.dataset.testid = 'target-cancel';
+    append(actions, coordinates, cancel); append(bar, svgIcon(kind === 'attack' ? 'target' : kind), copy, feedback, actions);
+    targetingBar = bar; root.querySelector('#battle-viewport')?.append(bar);
+  }
+  function commitTarget(point: Vec, additive = false): boolean {
+    if (!state || !targetMode) return false;
+    const mode = targetMode, check = checkTarget(state, content, mode, point);
+    if (!check.valid) {
+      const feedback = targetingBar?.querySelector('[data-target-feedback]'); if (feedback) setText(feedback, check.reason);
+      notify(check.reason); return false;
+    }
+    if (mode.kind === 'attack') send({ type: 'order', side: 0, ids: mode.ids, order: { kind: 'attack', ...check.point }, append: additive });
+    else if (mode.kind === 'barrier' || mode.kind === 'tower') {
+      send({ type: 'build', side: 0, ids: mode.ids, kind: mode.kind, ...check.point });
+      notify('Construction ordered. Supplies are charged when the engineer starts building.');
+    } else {
+      send({ type: 'ability', side: 0, ability: mode.kind, ...check.point });
+      notify(state.paused ? 'Ability planned. Resume to execute; supplies are charged on execution.' : 'Tactical ability ordered.');
+    }
+    cancelTarget(); return true;
+  }
+  function targetCoordinates() {
+    if (!state || !targetMode || !mission) return;
+    const current = ownUnits()[0] ?? state.strongholds.find(s => s.owner === 0 && s.kind === 'main')!;
+    const dialog = openModal('Choose target coordinates'); const form = element('form', 'order-form');
+    const x = element('input'); x.type = 'number'; x.min = '0'; x.max = String(mission.map[0]!.length - 1); x.step = '1'; x.value = String(Math.round(current.x)); x.required = true;
+    const y = element('input'); y.type = 'number'; y.min = '0'; y.max = String(mission.map.length - 1); y.step = '1'; y.value = String(Math.round(current.y)); y.required = true;
+    localAttribute(x, 'aria-label', 'MAP X'); localAttribute(y, 'aria-label', 'MAP Y');
+    const check = checkTarget(state, content, targetMode, current);
+    append(form, append(element('label', 'form-field'), label('MAP X'), x), append(element('label', 'form-field'), label('MAP Y'), y), element('p', 'form-note', `${check.cost} supplies`));
+    const error = element('p', 'target-error'); error.setAttribute('role', 'alert');
+    const submit = element('button', 'primary', 'Confirm target'); submit.type = 'submit'; append(form, error, submit);
+    form.onsubmit = event => { event.preventDefault(); const point = { x: x.valueAsNumber, y: y.valueAsNumber }; if (commitTarget(point)) closeModal(); else if (state && targetMode) setText(error, checkTarget(state, content, targetMode, point).reason); };
+    append(dialog, form);
+  }
   function triggerAbility(ability: 'rally' | 'recon' | 'volley') {
     if (!state || !mission || !purchased(ability)) return notify('Unlock this tactical ability in the civilization tree.');
     const cooldown = state.factions[0].cooldowns[ability] ?? 0;
     if (cooldown > 0) return notify(`${titleCase(ability)} is ready in ${Math.ceil(cooldown)} seconds.`);
     if (state.factions[0].resources < RULES.abilityCosts[ability]) return notify(`${titleCase(ability)} needs ${RULES.abilityCosts[ability]} supplies.`);
-    const units = ownUnits(); const home = state.strongholds.find(item => item.owner === 0 && item.kind === 'main');
-    const point = units[0]?.orders[0] ?? units[0] ?? home;
-    if (!point) return;
-    const dialog = openModal(`${titleCase(ability)} · select a target`); const form = element('form', 'order-form');
-    const x = element('input'); x.type = 'number'; x.min = '0'; x.max = String(mission.map[0]!.length - 1); x.value = String(Math.round(point.x)); x.required = true;
-    const y = element('input'); y.type = 'number'; y.min = '0'; y.max = String(mission.map.length - 1); y.value = String(Math.round(point.y)); y.required = true;
-    const descriptions = { rally: 'Restore 28% health to your soldiers within 4 cells. The target must be visible.', recon: 'Reveal a 9-cell area for 12 seconds. Recon can target undiscovered ground.', volley: 'Deal 45 damage to legally visible enemies within 2.4 cells. The target must be visible.' };
-    append(form, append(element('label', 'form-field'), label('MAP X'), x), append(element('label', 'form-field'), label('MAP Y'), y), element('p', 'form-note', `${descriptions[ability]} Cost: ${RULES.abilityCosts[ability]} supplies. Cooldown: ${RULES.abilityCooldowns[ability]} seconds.`));
-    const submit = element('button', 'primary', `Use ${ability}`); submit.type = 'submit'; append(form, submit);
-    form.onsubmit = event => { event.preventDefault(); const target = { x: Number(x.value), y: Number(y.value) }; if (ability !== 'recon' && !isVisible(target)) return notify('Choose a target within your current vision.'); send({ type: 'ability', side: 0, ability, ...target }); closeModal(); };
-    append(dialog, form);
+    startTarget(ability);
   }
-  function buildDialog(kind: 'barrier' | 'tower') {
-    const current = ownUnits()[0]; if (!current || !mission) return;
-    const dialog = openModal(`Build a ${kind}`); const form = element('form', 'order-form');
-    const x = element('input'); x.type = 'number'; x.min = '0'; x.max = String(mission.map[0]!.length - 1); x.value = String(Math.round(current.x + 2)); x.required = true;
-    const y = element('input'); y.type = 'number'; y.min = '0'; y.max = String(mission.map.length - 1); y.value = String(Math.round(current.y)); y.required = true;
-    append(form, append(element('label', 'form-field'), label('MAP X'), x), append(element('label', 'form-field'), label('MAP Y'), y), element('p', 'form-note', `Choose a nearby clear cell. Base cost: ${kind === 'barrier' ? RULES.barrierCost : RULES.towerCost} supplies before construction upgrades. Blocked or unaffordable sites are rejected.`));
-    const submit = element('button', 'primary', `Issue construction order`); submit.type = 'submit'; append(form, submit);
-    form.onsubmit = event => { event.preventDefault(); send({ type: 'build', side: 0, ids: [...selection.units], kind, x: Number(x.value), y: Number(y.value) }); closeModal(); }; append(dialog, form);
+  function buildDialog(kind: 'barrier' | 'tower') { startTarget(kind); }
+
+  function armyGuide() {
+    const dialog = openModal('Army guide', 'army-guide');
+    append(dialog, element('p', 'modal-copy', 'Study roles, counters and costs before committing your supplies.'));
+    const grid = element('div', 'army-guide-grid');
+    for (const def of currentEra().units) {
+      const entry = button('', () => showUnitDossier(def), 'dossier-entry');
+      append(entry, unitPortrait(def), element('span', '', def.name), element('small', '', titleCase(def.role)));
+      append(grid, entry);
+    }
+    append(dialog, grid);
+  }
+  function showUnitDossier(def: UnitDef) {
+    const dialog = openModal(def.name, 'unit-dossier');
+    const hero = element('div', 'dossier-hero'); append(hero, unitPortrait(def), append(element('div'), label(titleCase(def.role), 'eyebrow'), element('p', '', def.description))); append(dialog, hero);
+    const facts = element('div', 'dossier-facts');
+    for (const [name, value] of [['HEALTH', number(def.hp)], ['DAMAGE', number(def.damage)], ['ATTACK INTERVAL', `${def.attackTime}s`], ['BASE DPS', (def.damage / def.attackTime).toFixed(1)], ['CAPTURE POWER', `${def.capture}`], ['ARMOR', number(def.armor)], ['RANGE', `${def.range}`], ['SPEED', `${def.speed}`], ['VISION', `${def.vision}`], ['SUPPLIES', number(def.cost)], ['TRAINING', `${def.training}s`], ['CAPACITY', `${def.capacity}`]]) append(facts, stat(name!, value!));
+    append(dialog, facts, element('p', 'form-note', 'Base statistics before research, terrain and formation effects.'));
+    const counters = element('div', 'dossier-counters'); append(counters, element('h3', '', 'Strong against'));
+    const advantages = Object.entries(def.counters).filter(([, value]) => value && value > 1);
+    for (const [role, multiplier] of advantages) append(counters, append(element('div', 'counter-row'), label(titleCase(role)), element('strong', '', `${Math.round(multiplier! * 100)}%`)));
+    if (!advantages.length) append(counters, element('p', '', 'No bonus against a specific role.'));
+    append(counters, element('p', 'form-note', 'Damage multipliers apply before armor, cover and formation modifiers.'));
+    const threats = currentEra().units.filter(unit => (unit.counters[def.role] ?? 1) > 1);
+    append(counters, element('h3', '', 'Vulnerable to'));
+    for (const unit of threats) append(counters, element('span', 'dossier-tag', unit.name));
+    if (!threats.length) append(counters, element('p', '', 'No role has a specific counter bonus.'));
+    append(dialog, counters);
+    const abilityNotes = { frontline: 'A close attack with splash against nearby enemies.', ranged: 'An empowered shot against a visible enemy in range.', guard: 'Recover 25% of maximum health when wounded.', scout: 'Reveal a 9-cell area for 8 seconds, including stealth.', stealth: 'A double-strength strike against a visible enemy in range.', siege: 'A heavy strike with splash against nearby enemies.', engineer: 'Repair a damaged friendly structure within 2.5 cells by 40 health.' };
+    append(dialog, element('h3', '', 'Role ability · Q'), element('p', 'modal-copy', abilityNotes[def.role]), element('p', 'form-note', '4 supplies per activation · 18 second cooldown · charged only when useful'));
+    const selected = ownUnits().find(unit => unit.defId === def.id);
+    if (selected && mission) {
+      const tile = terrainAt(mission.map, selected.x, selected.y), modifiers = terrainModifiers(tile);
+      append(dialog, element('h3', '', 'Current terrain effects'));
+      const terrain = element('div', 'dossier-terrain');
+      append(terrain, stat('MOVEMENT', `${Math.round(modifiers.speed * 100)}%`), stat('DAMAGE REDUCTION', `${Math.round(modifiers.cover * 100)}%`), stat('VISION', `${Math.round(modifiers.vision * 100)}%`), stat('RANGE BONUS', `${modifiers.range > 0 ? '+' : ''}${modifiers.range}`)); append(dialog, terrain);
+    }
+    append(dialog, button('Army guide', armyGuide, 'secondary'));
   }
 
   function renderProduction() {
@@ -505,6 +619,7 @@ export function mountUI(options: UIOptions): GameUI {
     const heading = panelHeading('Main stronghold', 'RECRUITMENT & RESERVES', `${usage(state, 0, content)} / ${capacity(state, 0, content)} army capacity · ${faction.reserves.length} / ${faction.reserveCapacity} reserve slots · ${faction.lines.length} production ${faction.lines.length === 1 ? 'line' : 'lines'}`);
     heading.classList.add('illustrated-heading');heading.prepend(buildingPortrait(mission.era,0));
     heading.querySelector('p')!.dataset.productionCapacity = '';
+    append(heading, button('Army guide', armyGuide, 'text-button'));
     append(heading, button(productionExpanded ? 'Collapse ↓' : 'Expand ↑', () => { productionExpanded = !productionExpanded; renderContext(); }, 'text-button')); append(contextual, heading);
     const body = element('div', 'production-body'); const roster = element('div', 'recruit-roster');
     const units = unlockedUnits(state, 0, content);
@@ -568,6 +683,7 @@ export function mountUI(options: UIOptions): GameUI {
   }
   function minimapPointer(event: PointerEvent) {
     const point = minimapPoint(event); if (!point || !state) return; event.preventDefault();
+    if (targetMode) { if (event.button === 0) commitTarget(point, event.shiftKey); else if (event.button === 2) cancelTarget(); return; }
     if (event.button === 0) { renderer?.focus(point.x, point.y); return; }
     if (event.button !== 2 || !selection.units.length) return;
     const stronghold = state.strongholds.find(item => Math.hypot(item.x - point.x, item.y - point.y) < 1.8 && (item.owner === 0 || isVisible(item)));
@@ -653,13 +769,15 @@ export function mountUI(options: UIOptions): GameUI {
     drawTree();
   }
   function showResults(results: ResultsData) {
+    cancelTarget();
+    battleIntel?.destroy(); battleIntel = null;
     renderer?.destroy(); renderer = null; state = null; screen = 'results'; closeModal(); root.replaceChildren(); root.classList.remove('in-battle');
     const played = content.missions.find(item => item.id === results.missionId)!; const page = element('main', 'results-page'); page.style.setProperty('--results-art',`url("${new URL(`./art/era-cover-${played.era+1}.webp`,document.baseURI).href}")`);append(page, brand());
     const result = element('section', 'results-card'); append(result, element('div', `result-seal ${results.victory ? '' : 'defeat'}`, results.victory ? '✦' : '↶'), element('p', 'eyebrow', `${content.eras[played.era]!.name} / ${played.name}`), element('h1', '', results.victory ? 'Ground gained.' : 'A lesson from the field.'), element('p', 'result-description', results.victory ? 'The field is yours. Carry this knowledge into the next battle.' : 'Your campaign endures. Reconsider your army, your approach, and the ground you choose.'));
     const stats = element('div', 'results-stats'); append(stats, stat('PERFORMANCE SCORE', number(results.score)), stat('KNOWLEDGE EARNED', `+${results.reward} SP`), stat('PERSONAL BEST', number(campaign.records[played.id]?.bestScore ?? results.score))); append(result, stats);
     const actions = element('div', 'result-actions'); const next = nextMission();
-    if (results.victory && next.id !== played.id) append(actions, button('Next battle →', () => options.onStart(next.id, false), 'primary'));
-    else append(actions, button('Try this battle again →', () => options.onStart(played.id, false), 'primary'));
+    if (results.victory && next.id !== played.id) append(actions, button('Next battle →', () => requestStart(next.id, false), 'primary'));
+    else append(actions, button('Try this battle again →', () => requestStart(played.id, false), 'primary'));
     append(actions, button('Campaign', renderCampaign, 'secondary'), button('Civilization tree', openSkills, 'text-button')); append(result, actions); append(page, result); append(root, page);
   }
   function onKey(event: KeyboardEvent) {
@@ -670,10 +788,10 @@ export function mountUI(options: UIOptions): GameUI {
       if(first&&last){if(event.shiftKey&&(document.activeElement===first||!modal.contains(document.activeElement))){event.preventDefault();last.focus();}else if(!event.shiftKey&&(document.activeElement===last||!modal.contains(document.activeElement))){event.preventDefault();first.focus();}}
       return;
     }
-    if (event.key === 'Escape') { if (modal) closeModal(); else if (screen === 'battle') { selection = { units: [], stronghold: null }; renderer?.setSelection(selection); productionExpanded = false; renderContext(); } return; }
+    if (event.key === 'Escape') { if (modal) closeModal(); else if (targetMode) cancelTarget(); else if (screen === 'battle') { selection = { units: [], stronghold: null }; renderer?.setSelection(selection); productionExpanded = false; renderContext(); } return; }
     if (target.closest('input,select,textarea') || target.isContentEditable) return;
     if (modal || screen !== 'battle' || !state) return;
-    if (event.code === 'Space') { event.preventDefault(); send({ type: 'pause', value: !state.paused }); return; }
+    if (event.code === 'Space') { event.preventDefault(); tutorialOwnsPause = false; send({ type: 'pause', value: !state.paused }); return; }
     if (/^Digit[1-9]$/.test(event.code)) {
       event.preventDefault(); const index = Number(event.code.slice(-1));
       if (event.ctrlKey || event.metaKey) { groups.set(index, [...selection.units]); notify(`Control group ${index} assigned.`); }
@@ -682,6 +800,7 @@ export function mountUI(options: UIOptions): GameUI {
       return;
     }
     switch (event.code.startsWith('Key') ? event.code.slice(3).toLowerCase() : event.key.toLowerCase()) {
+      case 'a': if (selection.units.length) startTarget('attack'); break;
       case 's': if (selection.units.length) send({ type: 'editOrders', side: 0, ids: [...selection.units], orders: [] }); break;
       case 'h': selectHome(); break;
       case 'f': { const selected = ownUnits(); const formations = FORMATIONS.filter(formation => ['line', 'column'].includes(formation) || purchased('formations')); const next = formations[(formations.indexOf(selected[0]?.formation ?? 'line') + 1) % formations.length]!; if (selected.length) send({ type: 'formation', side: 0, ids: [...selection.units], formation: next }); break; }
@@ -697,6 +816,6 @@ export function mountUI(options: UIOptions): GameUI {
     beginBattle, setState,
     setCampaign(nextCampaign: Campaign, nextSavedBattle?: BattleState | null) { campaign = nextCampaign; eraIndex = Math.min(7, Math.max(0, campaign.selectedEra)); if (nextSavedBattle !== undefined) savedBattle = nextSavedBattle; if((campaign.language??'en')!==getLanguage())applyLanguage(campaign.language??'en');if (screen === 'campaign') { if (modal) campaignDirty = true; else renderCampaign(); } },
     showResults, showCampaign: renderCampaign, notify,
-    destroy() { destroyed = true; renderer?.destroy(); closeModal(); window.removeEventListener('keydown', onKey); root.remove(); toasts.remove(); },
+    destroy() { destroyed = true; cancelTarget(); battleIntel?.destroy(); renderer?.destroy(); closeModal(); window.removeEventListener('keydown', onKey); root.remove(); toasts.remove(); },
   };
 }
