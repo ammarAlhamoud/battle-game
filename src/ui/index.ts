@@ -666,7 +666,7 @@ export function mountUI(options: UIOptions): GameUI {
   renderCampaign();
   return {
     beginBattle, setState,
-    setCampaign(nextCampaign: Campaign, nextSavedBattle?: BattleState | null) { campaign = nextCampaign; if (nextSavedBattle !== undefined) savedBattle = nextSavedBattle; if((campaign.language??'en')!==getLanguage())applyLanguage(campaign.language??'en');if (screen === 'campaign') { if (modal) campaignDirty = true; else renderCampaign(); } },
+    setCampaign(nextCampaign: Campaign, nextSavedBattle?: BattleState | null) { campaign = nextCampaign; eraIndex = Math.min(7, Math.max(0, campaign.selectedEra)); if (nextSavedBattle !== undefined) savedBattle = nextSavedBattle; if((campaign.language??'en')!==getLanguage())applyLanguage(campaign.language??'en');if (screen === 'campaign') { if (modal) campaignDirty = true; else renderCampaign(); } },
     showResults, showCampaign: renderCampaign, notify,
     destroy() { destroyed = true; renderer?.destroy(); closeModal(); window.removeEventListener('keydown', onKey); root.remove(); toasts.remove(); },
   };
