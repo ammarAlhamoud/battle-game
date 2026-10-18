@@ -28,6 +28,7 @@ test('construction preview validates engineers, terrain, clear space and actual 
     const testPoint={x,y}; if (checkTarget(state,content,{kind:'tower',ids:[engineer.id]},testPoint).valid) { point=testPoint; break outer; }
   }
   const target = { kind: 'tower' as const, ids: [engineer.id] };
+  assert.equal(checkTarget(state,content,target,{x:-.3,y:point.y}).valid,false);
   const check = checkTarget(state, content, target, point); assert.equal(check.valid, true); assert.ok(check.cost < 65);
   assert.equal(checkTarget(state, content, { ...target, ids: [] }, point).valid, false);
   state.structures.push({id:'test',owner:0,kind:'barrier',hp:100,maxHp:100,built:0,...point});

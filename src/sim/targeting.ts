@@ -17,6 +17,7 @@ export function checkTarget(state: BattleState, content: GameContent, target: Ta
   const result = (reason = ''): TargetCheck => ({ valid: !reason, reason, cost, radius, point });
   if (state.ended) return result('This battle has ended.');
   if (target.kind === 'attack' && !state.units.some(u => u.owner === 0 && u.hp > 0 && target.ids.includes(u.id))) return result('Select soldiers before issuing an order.');
+  if (!Number.isFinite(position.x) || !Number.isFinite(position.y) || position.x < 0 || position.y < 0 || position.x >= mission.map[0]!.length || position.y >= mission.map.length) return result('Choose a point inside the battlefield.');
   if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x < 0 || point.y < 0 || point.x >= mission.map[0]!.length || point.y >= mission.map.length) return result('Choose a point inside the battlefield.');
   if (ability) {
     if (!skills.some(s => s.effect === ability)) return result('Unlock this tactical ability in the civilization tree.');

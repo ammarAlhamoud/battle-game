@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
-import type { BattleRenderer, BattleState, RendererOptions, Selection, Vec, Unit, Stronghold, Role } from '../contracts';
+import type { BattleRenderer, BattleState, RendererOptions, Selection, Vec, Unit, Stronghold, Role, TacticalTarget } from '../contracts';
 import { unitVisible, RULES } from '../sim/engine';
 import { getGraphicsQuality, observeGraphicsQuality, type GraphicsQuality } from './quality';
 import { paintTerrain, paintTerrainProp, TERRAIN_PROP_SIZE, TERRAIN_PROP_GROUND } from './terrain-art';
 import { drawUnit, UNIT_SIZE, UNIT_ORIGIN_Y } from './unit-art';
 import { drawArchitecture, drawBarrier, ARCHITECTURE_SIZE } from './architecture-art';
 import { drawBattleEffects, effectLifetime, type BattleEffect } from './effects-art';
+import { paintFogRaster, type FogRasterStats } from './fog-raster';
+import { checkTarget } from '../sim/targeting';
 
 /** High-resolution original artwork is baked once into current-era GPU atlases. */
 const TW = 64, TH = 32, UNIT = UNIT_SIZE, FORT = ARCHITECTURE_SIZE;
@@ -20,7 +22,7 @@ const rand = (x: number, y: number, seed: number): number => {
 
 interface Presented { sprite: Phaser.GameObjects.Sprite; x: number; y: number; target: Vec; unit: Unit; facing: number }
 interface FortView { image: Phaser.GameObjects.Image; owner: number | null; progress: number }
-type Effect = BattleEffect;
+interface Effect extends BattleEffect { interactionClock?: boolean }
 interface Fallen { sprite:Phaser.GameObjects.Sprite; birth:number; x:number; y:number; direction:number }
 
 class Battlefield extends Phaser.Scene {
@@ -38,7 +40,9 @@ class Battlefield extends Phaser.Scene {
   private paths!: Phaser.GameObjects.Graphics;
   private groundMarks!: Phaser.GameObjects.Graphics;
   private overlays!: Phaser.GameObjects.Graphics;
-  private fog!: Phaser.GameObjects.Graphics;
+  private fog!: Phaser.GameObjects.Image;
+  private fogTexture!: Phaser.Textures.CanvasTexture;
+  private fogRasterStats: FogRasterStats = { hiddenTiles: 0, runs: 0, featherEdges: 0 };
   private fxGraphics!: Phaser.GameObjects.Graphics;
   private dragGraphics!: Phaser.GameObjects.Graphics;
   private atmosphere!: Phaser.GameObjects.Graphics;
@@ -64,6 +68,10 @@ class Battlefield extends Phaser.Scene {
   private frameMs = 16.7;
   private slowFor = 0;
   private lastPresentation = 0;
+  private inputEnabled = true;
+  private targeting: TacticalTarget | null = null;
+  private targetGhost!: Phaser.GameObjects.Image;
+  private pointerInside = false;
   constructor(opts: RendererOptions) {
     super('battle');this.opts=opts;this.widthCells=opts.mission.map[0].length;this.heightCells=opts.mission.map.length;
     this.offsetX=this.heightCells*TW/2+120;
@@ -104,11 +112,16 @@ class Battlefield extends Phaser.Scene {
     this.makeAtlases();this.makeTerrain();
     this.groundMarks=this.add.graphics().setDepth(-10);
     this.paths=this.add.graphics().setDepth(80000);
-    this.fog=this.add.graphics().setDepth(90000);
+    // A soft fog mask is intentionally half resolution; unit and terrain art stay native.
+    const fogWidth=Math.ceil(((this.widthCells+this.heightCells)*TW/2+240)/2);
+    const fogHeight=Math.ceil(((this.widthCells+this.heightCells)*TH/2+240)/2);
+    this.fogTexture=this.textures.createCanvas('fog-raster',fogWidth,fogHeight)!;
+    this.fog=this.add.image(0,0,'fog-raster').setOrigin(0).setScale(2).setDepth(90000);
     this.atmosphere=this.add.graphics().setDepth(91000);
     this.overlays=this.add.graphics().setDepth(95000);
     this.fxGraphics=this.add.graphics().setDepth(96000);
     this.dragGraphics=this.add.graphics().setScrollFactor(0).setDepth(100000);
+    this.targetGhost=this.add.image(0,0,'strongholds',4).setOrigin(.5,FORT_GROUND/FORT).setDepth(94000).setVisible(false);
     const camera=this.cameras.main;
     camera.setBackgroundColor(this.opts.mission.era===7?'#1c3038':'#34483c');
     camera.setZoom(.98);camera.setBounds(0,0,(this.widthCells+this.heightCells)*TW/2+240,(this.widthCells+this.heightCells)*TH/2+220);
@@ -118,7 +131,10 @@ class Battlefield extends Phaser.Scene {
     this.input.on('pointerdown',(p:Phaser.Input.Pointer)=>this.pointerDown(p));
     this.input.on('pointerup',(p:Phaser.Input.Pointer)=>this.pointerUp(p));
     this.input.on('pointermove',(p:Phaser.Input.Pointer)=>this.pointerMove(p));
+    this.input.on('gameover',()=>{this.pointerInside=true;});
+    this.input.on('gameout',()=>{this.pointerInside=false;this.targetGhost.setVisible(false);});
     this.input.on('wheel',(_p:Phaser.Input.Pointer,_o:unknown,_x:number,dy:number)=>{
+      if(!this.acceptsInput())return;
       const pointer=this.input.activePointer;const before=camera.getWorldPoint(pointer.x,pointer.y);
       camera.setZoom(clamp(camera.zoom*(dy>0?.9:1.1),.48*this.quality,1.9*this.quality));
       const after=camera.getWorldPoint(pointer.x,pointer.y);camera.scrollX+=before.x-after.x;camera.scrollY+=before.y-after.y;
@@ -171,6 +187,18 @@ class Battlefield extends Phaser.Scene {
   }
   focus(p:Vec):void {
     if(!this.ready){this.focusPending=p;return;}const pos=this.world(p);this.cameras.main.centerOn(pos.x,pos.y);this.cameraMoved=true;
+  }
+  private acceptsInput():boolean {
+    return this.inputEnabled&&!document.querySelector('[aria-modal="true"]');
+  }
+  setInputEnabled(enabled:boolean):void {
+    this.inputEnabled=enabled;
+    if(!enabled){this.drag=null;this.hover=null;this.dragGraphics?.clear();this.targetGhost?.setVisible(false);this.opts.parent.style.cursor='default';this.input?.keyboard?.resetKeys();}
+  }
+  setTargeting(target:TacticalTarget|null):void {
+    this.targeting=target?{kind:target.kind,ids:[...target.ids]}:null;
+    this.drag=null;this.dragGraphics?.clear();this.targetGhost?.setVisible(false);
+    this.opts.parent.style.cursor=target?'crosshair':'default';
   }
   resize():void {
     const width=this.opts.parent.clientWidth,height=this.opts.parent.clientHeight;
@@ -225,7 +253,8 @@ class Battlefield extends Phaser.Scene {
       image.setAlpha(s.built<1?.4:.95).setTint(s.owner===0?0xccfff0:0xffcab8);
     }
     for(const [id,s] of this.structureSprites)if(!structures.has(id)){s.destroy();this.structureSprites.delete(id);}
-    const now=this.time.now;
+    // Combat presentation freezes with tactical pause, including projectiles and falling units.
+    const now=this.motionTime;
     for(const e of state.events)if(e.id>this.lastEvent) {
       const hiddenSource=e.kind==='shot'&&e.owner===1&&state.units.some(u=>u.owner===1&&Math.hypot(u.x-e.x,u.y-e.y)<.35&&!unitVisible(state,u,0,this.opts.content));
       const targetAllowed=e.kind!=='shot'||!e.target||this.visible(e.target);
@@ -248,32 +277,37 @@ class Battlefield extends Phaser.Scene {
     }
   }
   drawFog():void {
-    this.fog.clear();if(!this.current)return;
-    const fog=this.current.fog[0];
-    for(let y=0;y<this.heightCells;y++)for(let x=0;x<this.widthCells;x++) {
-      const i=y*this.widthCells+x;if(fog.visible[i])continue;const p=this.world({x,y});
-      this.fog.fillStyle(this.opts.mission.era===7?0x172831:0x25372f,fog.explored[i]?.62:.96);
-      this.fog.fillPoints([{x:p.x,y:p.y-TH/2-.6},{x:p.x+TW/2+.6,y:p.y},{x:p.x,y:p.y+TH/2+.6},{x:p.x-TW/2-.6,y:p.y}],true);
-    }
+    if(!this.current)return;
+    this.fogRasterStats=paintFogRaster(this.fogTexture.getContext(),this.current.fog[0],{
+      columns:this.widthCells,rows:this.heightCells,tileWidth:TW,tileHeight:TH,scale:.5,
+      space:this.opts.mission.era===7,world:p=>this.world(p),
+    });
+    // Upload only when visibility/exploration flags changed; a normal frame draws one quad.
+    this.fogTexture.refresh();
   }
   pointerDown(p:Phaser.Input.Pointer):void {
+    if(!this.acceptsInput())return;
     const camera=this.cameras.main;const world=camera.getWorldPoint(p.x,p.y);
-    if(p.rightButtonDown()){this.orderAt(this.cell(world),(p.event as MouseEvent).shiftKey);return;}
+    if(p.rightButtonDown()){if(!this.targeting)this.orderAt(this.cell(world),(p.event as MouseEvent).shiftKey);return;}
     this.drag={x:p.x,y:p.y,world,middle:p.middleButtonDown(),camera:{x:camera.scrollX,y:camera.scrollY}};
   }
   pointerMove(p:Phaser.Input.Pointer):void {
+    if(!this.acceptsInput())return;
+    this.pointerInside=true;
     const camera=this.cameras.main;this.pointerWorld=camera.getWorldPoint(p.x,p.y);
     if(this.drag?.middle&&p.isDown) {
       camera.scrollX=this.drag.camera.x-(p.x-this.drag.x)/camera.zoom;camera.scrollY=this.drag.camera.y-(p.y-this.drag.y)/camera.zoom;this.cameraMoved=true;return;
     }
+    if(this.targeting){this.hover=null;this.opts.parent.style.cursor='crosshair';return;}
     this.hover=this.pickUnit(this.pointerWorld)?.unit.id??null;
     if(!this.hover)for(const fort of this.current?.strongholds??[])if(this.fortHit(fort,this.pointerWorld)){this.hover=fort.id;break;}
     this.opts.parent.style.cursor=this.drag&&!this.drag.middle?'crosshair':this.hover?'pointer':'default';
   }
   pointerUp(p:Phaser.Input.Pointer):void {
-    const drag=this.drag;this.drag=null;this.dragGraphics.clear();if(!drag||drag.middle||p.rightButtonReleased())return;
+    const drag=this.drag;this.drag=null;this.dragGraphics.clear();if(!this.acceptsInput()||!drag||drag.middle||p.rightButtonReleased())return;
     const additive=(p.event as MouseEvent).shiftKey;
     const world=this.cameras.main.getWorldPoint(p.x,p.y);
+    if(this.targeting){if(Math.hypot(p.x-drag.x,p.y-drag.y)<=7)this.opts.onTarget?.(this.cell(world),additive);return;}
     if(Math.hypot(p.x-drag.x,p.y-drag.y)>7) {
       const selected:string[]=[];
       const x1=Math.min(drag.world.x,world.x),x2=Math.max(drag.world.x,world.x),y1=Math.min(drag.world.y,world.y),y2=Math.max(drag.world.y,world.y);
@@ -296,23 +330,24 @@ class Battlefield extends Phaser.Scene {
     this.opts.onSelect({units:[],stronghold:fort?.id??null},additive);
   }
   orderAt(cell:Vec,append:boolean):void {
-    if(!this.current)return;const p=this.world(cell),enemy=this.pickUnit(p,1)?.unit??null;
+    if(!this.current||!this.acceptsInput()||this.targeting)return;const p=this.world(cell),enemy=this.pickUnit(p,1)?.unit??null;
     if(enemy){this.opts.onOrder({kind:'attack',x:enemy.x,y:enemy.y,target:enemy.id},append);return;}
     let fort:Stronghold|null=null,closest=45;
     for(const s of this.current.strongholds)if(s.owner===0||this.visible(s)){const q=this.world(s),d=Math.hypot(q.x-p.x,q.y-p.y);if(d<closest||this.fortHit(s,p)){closest=d;fort=s;}}
     if(fort){this.opts.onOrder({kind:fort.owner===0?'defend':'capture',x:fort.x,y:fort.y,target:fort.id},append);return;}
     const x=clamp(cell.x,0,this.widthCells-1),y=clamp(cell.y,0,this.heightCells-1);this.opts.onOrder({kind:'move',x,y},append);
-    this.effects.push({x,y,kind:'order',birth:this.time.now,owner:0,seed:0});
+    this.effects.push({x,y,kind:'order',birth:this.time.now,owner:0,seed:0,interactionClock:true});
   }
   update(time:number,delta:number):void {
     if(!this.ready)return;
-    const elapsed=this.lastPresentation?Math.min(200,time-this.lastPresentation):delta;this.lastPresentation=time;
+    const presentationNow=performance.now();
+    const elapsed=this.lastPresentation?Math.min(200,presentationNow-this.lastPresentation):delta;this.lastPresentation=presentationNow;
     this.frameMs=this.frameMs*.96+elapsed*.04;
     this.slowFor=this.frameMs>34?this.slowFor+elapsed:Math.max(0,this.slowFor-elapsed*2);
     if(this.qualityMode==='adaptive'&&this.slowFor>2600&&this.quality>.65)this.lowerVisualResolution();
     const camera=this.cameras.main;
     const active=document.activeElement;const editing=active instanceof HTMLInputElement||active instanceof HTMLTextAreaElement||active instanceof HTMLSelectElement;
-    if(!editing) {
+    if(!editing&&this.acceptsInput()) {
       const speed=delta*.56*this.quality/camera.zoom;let dx=0,dy=0;
       const freeKeys=this.selection.units.length===0;
       if((freeKeys&&this.keys.W.isDown)||this.keys.UP.isDown)dy-=speed;if((freeKeys&&this.keys.S.isDown)||this.keys.DOWN.isDown)dy+=speed;
@@ -321,7 +356,7 @@ class Battlefield extends Phaser.Scene {
       if(Phaser.Input.Keyboard.JustDown(this.keys.HOME)){const home=this.opts.mission.strongholds.find(s=>s.owner===0&&s.kind==='main');if(home)this.focus(home);}
     }
     const state=this.current;if(!state)return;
-    if(!state.paused)this.motionTime+=Math.min(delta,100);
+    if(!state.paused&&!state.ended)this.motionTime+=Math.min(elapsed,100);
     this.overlays.clear();this.paths.clear();this.fxGraphics.clear();this.atmosphere.clear();this.groundMarks.clear();
     const selected=new Set(this.selection.units);
     for(const [id,v] of this.presented) {
@@ -367,9 +402,10 @@ class Battlefield extends Phaser.Scene {
       const p=this.world(memory);this.overlays.lineStyle(1,ENEMY,.3).strokeEllipse(p.x,p.y,17,8);
       this.overlays.lineStyle(1,ENEMY,.22).lineBetween(p.x-3,p.y-12,p.x+3,p.y-12);
     }
-    this.drawStrongholds(time);
-    this.drawEffects(time);
-    if(this.frameMs<34&&this.presented.size<180)this.drawAtmosphere(time);
+    this.drawStrongholds(this.motionTime);
+    this.drawEffects();
+    this.drawTargetPreview();
+    if(this.frameMs<34&&this.presented.size<180)this.drawAtmosphere(this.motionTime);
     if(this.drag&&!this.drag.middle){const p=this.input.activePointer;if(Math.hypot(p.x-this.drag.x,p.y-this.drag.y)>7){this.dragGraphics.clear().fillStyle(FRIEND,.1).fillRect(this.drag.x,this.drag.y,p.x-this.drag.x,p.y-this.drag.y).lineStyle(1,FRIEND,.9).strokeRect(this.drag.x,this.drag.y,p.x-this.drag.x,p.y-this.drag.y);}}
     if(this.cameraMoved){this.opts.parent.dispatchEvent(new CustomEvent('camera-move'));this.cameraMoved=false;}
   }
@@ -413,9 +449,35 @@ class Battlefield extends Phaser.Scene {
       }
     }
   }
-  drawEffects(time:number):void {
-    this.effects=this.effects.filter(effect=>time-effect.birth<effectLifetime(effect,this.opts.mission.era));
-    drawBattleEffects(this.fxGraphics,this.effects,time,this.opts.mission.era,p=>this.world(p),this.frameMs);
+  drawTargetPreview():void {
+    this.targetGhost.setVisible(false);
+    if(!this.targeting||!this.current||!this.pointerInside||!this.acceptsInput())return;
+    const pointer=this.input.activePointer,camera=this.cameras.main;
+    if(pointer.x<0||pointer.y<0||pointer.x>camera.width||pointer.y>camera.height)return;
+    this.pointerWorld=camera.getWorldPoint(pointer.x,pointer.y);
+    const result=checkTarget(this.current,this.opts.content,this.targeting,this.cell(this.pointerWorld));
+    const point=this.world(result.point),color=result.valid?FRIEND:ENEMY;
+    if(result.radius>0){
+      const rx=result.radius*TW/Math.SQRT2,ry=result.radius*TH/Math.SQRT2;
+      this.overlays.fillStyle(color,result.valid?.035:.018).fillEllipse(point.x,point.y,rx*2,ry*2);
+      this.overlays.lineStyle(1.5,color,.68).strokeEllipse(point.x,point.y,rx*2,ry*2);
+    }
+    const building=this.targeting.kind==='barrier'||this.targeting.kind==='tower';
+    const width=building?TW/2:11,height=building?TH/2:5;
+    const corners=[{x:point.x,y:point.y-height},{x:point.x+width,y:point.y},{x:point.x,y:point.y+height},{x:point.x-width,y:point.y}];
+    this.overlays.fillStyle(color,.1).fillPoints(corners,true);
+    this.overlays.lineStyle(1.6,color,.92).strokePoints(corners,true);
+    this.overlays.lineStyle(1,color,.7).lineBetween(point.x-4,point.y,point.x+4,point.y).lineBetween(point.x,point.y-3,point.x,point.y+3);
+    if(building){
+      this.targetGhost.setFrame(this.targeting.kind==='tower'?2:4).setPosition(point.x,point.y)
+        .setScale(this.targeting.kind==='tower'?.64:.68).setAlpha(result.valid?.36:.22).setTint(color).setVisible(true);
+    }
+  }
+  drawEffects():void {
+    this.effects=this.effects.filter(effect=>(effect.interactionClock?this.time.now:this.motionTime)-effect.birth<effectLifetime(effect,this.opts.mission.era));
+    drawBattleEffects(this.fxGraphics,this.effects.filter(effect=>!effect.interactionClock),this.motionTime,this.opts.mission.era,p=>this.world(p),this.frameMs);
+    // Planned-order feedback remains transient while the battle itself is paused.
+    drawBattleEffects(this.fxGraphics,this.effects.filter(effect=>effect.interactionClock),this.time.now,this.opts.mission.era,p=>this.world(p),this.frameMs);
   }
   drawAtmosphere(time:number):void {
     // Sparse environmental animation; its positions are public terrain, never hidden state.
@@ -440,6 +502,8 @@ export function createRenderer(options:RendererOptions):BattleRenderer {
   return {
     setState(state){if(!destroyed)scene.acceptState(state);},
     setSelection(selection){scene.selection={units:[...selection.units],stronghold:selection.stronghold};},
+    setTargeting(target){scene.setTargeting(target);},
+    setInputEnabled(enabled){scene.setInputEnabled(enabled);},
     focus(x,y){if(!destroyed)scene.focus({x,y});},
     getViewport(){return destroyed?[]:scene.viewport();},
     destroy(){if(destroyed)return;destroyed=true;stopObservingQuality();observer.disconnect();options.parent.style.cursor='';delete options.parent.dataset.renderer;game.destroy(true);},
