@@ -90,6 +90,7 @@ test('main capture wins; main buildings cannot be destroyed by attack', () => {
   own(state, 1).x = 1; own(state, 1).y = 1; const u = own(state); u.x = enemyMain.x - 1; u.y = enemyMain.y;
   u.orders = [{ kind: 'capture', target: enemyMain.id, x: enemyMain.x, y: enemyMain.y }];
   ticks(state, content, 260); assert.equal(state.winner, 0); assert.equal(state.ended, true); assert.equal(enemyMain.owner, 0);
+  assert.ok(state.events.some(e => e.kind === 'alert' && e.owner === 1 && e.x === enemyMain.x && !e.target), 'occupation alerts identify the threatened friendly objective without hidden attackers');
 });
 
 test('military collapse considers viable queues, reserves and affordable replacement', () => {
@@ -161,4 +162,53 @@ test('queued plans survive self-defense and complete movement; JSON restore cont
   assert.equal(u.orders[0]?.kind, 'move'); ticks(state, content, 40); assert.ok(u.x > 10);
   state.aiSides = [0, 1]; const restored = JSON.parse(JSON.stringify(state)) as BattleState;
   ticks(state, content, 50); ticks(restored, content, 50); assert.deepEqual(restored, state);
+});
+
+test('terrain cover, role counters, armor formations and damage skills produce different combat outcomes', () => {
+  function openingDamage(options: { cover?: boolean; shield?: boolean; damageSkill?: boolean; targetRole?: Role } = {}): number {
+    const { state, content, mission } = fixture(); const attacker = own(state), target = own(state, 1);
+    attacker.defId = 'e1-ranged'; attacker.x = 10; attacker.y = 10; attacker.orders = [{ kind: 'defend', x: 10, y: 10 }];
+    target.x = 13; target.y = 10; target.orders = [{ kind: 'defend', x: 13, y: 10 }];
+    if (options.targetRole) target.defId = `e1-${options.targetRole}`;
+    target.hp = 100;
+    if (options.cover) mission.map[10] = mission.map[10]!.slice(0, 13) + 'c' + mission.map[10]!.slice(14);
+    if (options.shield) target.formation = 'shield';
+    if (options.damageSkill) { content.skills.push(skill('offense', 'damage', .2)); state.factions[0].skills.push('offense'); }
+    stepBattle(state, content); return 100 - target.hp;
+  }
+  const baseline = openingDamage();
+  assert.ok(openingDamage({ cover: true }) < baseline);
+  assert.ok(openingDamage({ shield: true }) < baseline);
+  assert.ok(openingDamage({ damageSkill: true }) > baseline);
+  assert.ok(openingDamage({ targetRole: 'scout' }) < baseline, 'ranged has explicit frontline counter advantage');
+});
+
+test('stealth opening strike gains ambush damage and reveals the attacker', () => {
+  const { state, content } = fixture(); const ambusher = own(state), target = own(state, 1);
+  ambusher.defId = 'e1-stealth'; ambusher.x = 10; ambusher.y = 10; target.x = 11.35; target.y = 10;
+  ambusher.orders = [{ kind: 'defend', x: 10, y: 10 }]; target.orders = [{ kind: 'defend', x: target.x, y: target.y }];
+  stepBattle(state, content);
+  assert.ok(target.hp < 88, 'hidden strike exceeds ordinary 10.7 damage');
+  assert.equal(unitVisible(state, ambusher, 1, content), true);
+});
+
+test('planned routes cannot disclose unseen enemy construction, then adapt once it becomes visible', () => {
+  const { state, content } = fixture(); const unit = own(state); unit.x = 4; unit.y = 13;
+  state.structures.push({ id: 's900', kind: 'barrier', owner: 1, x: 12, y: 13, hp: 180, maxHp: 180, built: 1 });
+  applyCommand(state, { type: 'order', side: 0, ids: [unit.id], order: { kind: 'move', x: 20, y: 13 } }, content);
+  stepBattle(state, content);
+  assert.ok(unit.route.some(p => p.x === 12 && p.y === 13), 'an undiscovered barrier cannot inform strategic planning');
+  unit.x = 9; unit.y = 13;
+  applyCommand(state, { type: 'order', side: 0, ids: [unit.id], order: { kind: 'move', x: 20, y: 13 } }, content);
+  stepBattle(state, content);
+  assert.ok(!unit.route.some(p => p.x === 12 && p.y === 13), 'revealed barrier changes the ordinary route');
+});
+
+test('surrender ends an active or paused attempt once without advancing time or repeating final score', () => {
+  const { state, content } = fixture(); applyCommand(state, { type: 'pause', value: true }, content);
+  applyCommand(state, { type: 'surrender', side: 0 }, content);
+  assert.equal(state.ended, true); assert.equal(state.winner, 1); assert.equal(state.time, 0); assert.equal(state.tick, 0);
+  const scores = state.factions.map(f => f.score);
+  applyCommand(state, { type: 'surrender', side: 1 }, content); stepBattle(state, content);
+  assert.deepEqual(state.factions.map(f => f.score), scores); assert.equal(state.winner, 1);
 });
