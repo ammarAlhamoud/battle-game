@@ -1,0 +1,79 @@
+{
+  "date": "2026-10-18",
+  "unitTests": {
+    "passed": 85,
+    "failed": 0,
+    "skipped": 0
+  },
+  "browser": {
+    "tactics": 8,
+    "runtime": 8,
+    "localization": 8,
+    "production": 11,
+    "pageErrors": []
+  },
+  "art": {
+    "unitFrames": 448,
+    "unitDesigns": 112,
+    "architecture": 40,
+    "terrainProps": 64,
+    "skillMedallions": 16,
+    "maps": 40,
+    "deterministicMaps": 40,
+    "webglEras": 8,
+    "assetFailures": 0,
+    "pageErrors": 0
+  },
+  "renderOnlySoftware": {
+    "environment": {
+      "headless": true,
+      "renderer": "ANGLE SwiftShader software WebGL",
+      "hardwareCaveat": "Container CPU rendering; these measurements are not representative mid-range desktop GPU claims."
+    },
+    "ordinary": {
+      "durationMs": 4568,
+      "rafFrames": 68,
+      "rafFPS": 14.88,
+      "phaserFrames": 68,
+      "phaserFPS": 14.88,
+      "medianFrameMs": 66.7,
+      "p95FrameMs": 133.2,
+      "units": 14,
+      "canvasWidth": 1280,
+      "canvasHeight": 820,
+      "quality": 1,
+      "simulationRunning": false
+    },
+    "heavy": {
+      "durationMs": 4549,
+      "rafFrames": 46,
+      "rafFPS": 10.11,
+      "phaserFrames": 46,
+      "phaserFPS": 10.11,
+      "medianFrameMs": 100,
+      "p95FrameMs": 116.7,
+      "units": 240,
+      "canvasWidth": 1280,
+      "canvasHeight": 820,
+      "quality": 1,
+      "simulationRunning": false
+    }
+  },
+  "baselineCampaign": {
+    "missions": 40,
+    "ended": 40,
+    "minSeconds": 53.1,
+    "maxSeconds": 247.6,
+    "sideZeroWins": 21,
+    "sideOneWins": 19
+  },
+  "allSkillsRepresentativeCampaign": {
+    "missions": 16,
+    "ended": 16,
+    "minSeconds": 41.2,
+    "maxSeconds": 119.2,
+    "sideZeroWins": 10,
+    "sideOneWins": 6,
+    "peakUnits": 27
+  }
+}

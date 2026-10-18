@@ -7,8 +7,10 @@ These are observed results from the implementation environment. The specificatio
 | Check | Observed result |
 |---|---|
 | TypeScript / production build | Passed; Vite emits the application, simulation Worker and versioned offline cache. |
-| Node test suite | 62 passed, zero failed or skipped. Content, simulation, navigation, fair AI, economy, production, captures, progression, save validation and localization are exercised. |
+| Node test suite | 85 passed, zero failed or skipped. Content, simulation, navigation, fair AI, economy, production, captures, progression, save validation and localization are exercised. |
 | Production browser scenario | 11 checks passed in Chromium 154.0.8037.57; zero JavaScript page errors. |
+| Tactical interaction scenario | 8 checks passed: initial/rapid pause, attack-move, invalid-target cancellation, retargeted recon, actual engineering, specialist dossiers, Arabic compact controls and saved-attempt replacement. |
+| Worker/session regression | 8 real Chromium controller/Worker scenarios passed; zero page errors. Snapshot causality, failed imports, stale results, respec, constructor failure and module-load recovery are covered. |
 | Bilingual interface scenario | 8 checks passed; zero missing translations on reviewed screens and zero JavaScript page errors. |
 | Real IndexedDB recovery | Passed complete snapshots, atomic current/previous records, corrupt-current fallback, backup preservation, aborted transactions, ordered concurrent saves, import/export and invalid-ledger rejection. |
 | Baseline campaign simulation | All 40 authored missions ended naturally; no 600-second timeouts. Both factions followed the same rules and observation-filtered AI. |
@@ -57,6 +59,8 @@ Run the browser checks from a third terminal:
 ```sh
 npm run test:storage
 npm run test:localization
+npm run test:tactics
+npm run test:runtime
 npm run test:art
 node scripts/simulate-campaign.mjs --mission=e1m1 --basic-skills
 npm run test:browser
@@ -76,10 +80,30 @@ npm run test:campaign -- --skills
 npm run benchmark
 ```
 
+## Professionalization review
+
+[The review and before/after gallery](PROFESSIONAL_REVIEW_AR.md) record the current-run visual evidence, specialist defects and implemented changes. Five observation-privacy regressions protect field intelligence; the simulation tests also verify movement disengagement, attack-move, retargeting and bounded paused unit abilities. Tutorial and rapid pause behavior are exercised in the real UI.
+
+The GitHub Actions workflow installs locked dependencies, runs the deterministic tests and builds production. Those commands passed locally; this environment received HTTP 403 when reading remote Actions status, so a remote green check is not asserted.
+
 ## Performance and remaining limits
 
 [PERFORMANCE.md](PERFORMANCE.md) records CPU timing and memory methodology. On the shared server, 40-unit encounters averaged 9.602 ms per simulation tick; the synthetic 200-unit workload averaged 46.416 ms, with occasional ticks exceeding the 100 ms simulation budget. The extended test simulated 500 seconds with ongoing movement/combat and naturally completed battles. These numbers exclude browser rendering.
 
-After the detailed-art upgrade, a headless software-WebGL sample at native 1280 × 820 in **High detail** measured 16.35 FPS for an ordinary 14-unit scene and 10.53 FPS for a synthetic 240-unit scene. The ordinary median/95th-percentile frame times were 66.6/116.5 ms; the heavy sample's were 99.9/216.6 ms. These approximately 4.5-second samples rendered through Chromium's CPU-based ANGLE SwiftShader, with simulation stopped. They establish actual scene rendering and software-server cost, rather than consumer GPU performance. Full native resolution is substantially more expensive on this software renderer than the earlier adaptive 832 × 520 sample; users of slower devices can select Adaptive performance.
+In the earlier detailed-art baseline, a headless software-WebGL sample at native 1280 × 820 in **High detail** measured 16.35 FPS for an ordinary 14-unit scene and 10.53 FPS for a synthetic 240-unit scene. The ordinary median/95th-percentile frame times were 66.6/116.5 ms; the heavy sample's were 99.9/216.6 ms. These approximately 4.5-second samples rendered through Chromium's CPU-based ANGLE SwiftShader, with simulation stopped. They establish actual scene rendering and software-server cost, rather than consumer GPU performance. Full native resolution is substantially more expensive on this software renderer than the earlier adaptive 832 × 520 sample; users of slower devices can select Adaptive performance.
 
 The requested 60 FPS ordinary / 30 FPS heavy targets on a mid-range desktop remain unverified. Real-GPU performance, exhaustive human campaign balance, every skill combination and arbitrary adversarial congestion remain outside the completed checks. Campaign viability and economic conservation results are detailed in [BALANCE.md](BALANCE.md). No hardware frame-rate guarantee is inferred from the cloud CPU tests.
+
+The fog-cache update additionally replaced the inspected 572-cell scene's 11,440
+Graphics scalar values with one image quad. Dedicated fog draw median changed from
+0.3ms to below 0.1ms in that local sample; repaint/upload cost 2.1ms only on visibility
+changes. This component measurement does not establish whole-game FPS.
+
+A fresh full art-matrix run after the fog change again passed all 448 frames, 40
+buildings, 64 scenery variants, 16 medallions, 40 deterministic maps and eight live
+WebGL scenes, including picking and disposal. Its render-only software samples were
+**14.88 FPS / 66.7ms median / 133.2ms p95** with 14 units, and **10.11 FPS /
+100ms median / 116.7ms p95** with 240 units, at native 1280×820 High quality.
+No whole-game frame-rate improvement is inferred from the narrow fog CPU saving.
+The same hardware-target verification gap remains. A compact machine-readable
+[review result](REVIEW_RESULTS.json) retains the current checks and samples.

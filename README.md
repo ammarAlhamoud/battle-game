@@ -47,7 +47,8 @@ Buy civilization or era skills between missions. Older era skills remain recorde
 |---|---|
 | Left-click / drag | Select object / select army rectangle |
 | Shift + selection | Add soldiers to selection |
-| Right-click | Contextual move, attack, capture, or defend |
+| Right-click | Contextual move, attack, capture, or defend; Move disengages from combat |
+| A + left-click | Attack-move: advance while engaging visible enemies |
 | Shift + right-click | Append a sequential order |
 | Space | Tactical pause; continue selecting and planning |
 | Arrow keys / middle drag | Pan camera |
@@ -55,8 +56,13 @@ Buy civilization or era skills between missions. Older era skills remain recorde
 | Ctrl + 1–9 | Assign control group |
 | 1–9 / Shift + 1–9 | Recall / add to a control group |
 | F / S / H | Cycle formation / stop / focus home |
-| Q / R / T / V | Unit ability / rally / reconnaissance / volley |
+| Q / R / T / V | Unit ability / rally / reconnaissance / volley; click the field to aim global abilities |
+| Escape / right-click while targeting | Cancel a target without spending supplies |
 | Minimap left / right click | Camera navigation / selected army order |
+
+The first tutorial begins paused. Dismissing it hands control to the player; tactical pause remains available throughout play. The field-intelligence panel tracks known objectives, capture progress, first-capture rewards and visible threats near home. It retains last-seen information without exposing hidden enemy state.
+
+Choose **Unit dossier** or **Army guide** for base statistics, damage counters, role abilities and current terrain effects. Global abilities and engineer construction use field targeting with an area/placement preview; **Enter coordinates** keeps a keyboard alternative. Repeated paused casts update the plan rather than stacking duplicate activations. Starting a new attempt asks before replacing an unfinished save.
 
 The contextual command panel supports editing and reordering planned actions. Skill connections, requirements, costs, and purchased states are shown in a pannable, zoomable tree. During combat the tree can be inspected; purchases are blocked.
 
@@ -75,6 +81,8 @@ npm run check
 npm test
 npm run build
 ```
+
+With the development server running, `npm run test:tactics` exercises direct targeting, real construction, Arabic dossiers and rapid pause input; `npm run test:runtime` checks worker failure recovery and save races. GitHub Actions runs the deterministic tests and production build on pushes and pull requests. See the [professionalization review and Arabic gallery](docs/PROFESSIONAL_REVIEW_AR.md) for before/after evidence and remaining limits.
 
 The automated suites use Node's test runner against the same TypeScript simulation and content used in the browser. Browser and performance instructions and actual measurements are recorded in [verification](docs/VERIFICATION.md).
 
