@@ -30,9 +30,11 @@ function hasEffect(state: BattleState, side: Side, content: GameContent, type: s
   return content.skills.some(s => state.factions[side].skills.includes(s.id) && s.effect === type && (s.era === null || s.era === era));
 }
 function main(state: BattleState, side: Side): Stronghold | undefined { return state.strongholds.find(s => s.kind === 'main' && s.owner === side); }
-function obstacles(state: BattleState): Structure[] {
+function obstacles(state: BattleState, side?: Side, content?: GameContent): Structure[] {
   // Buildings occupy one map cell; capture remains possible from the surrounding zone.
-  return [...state.structures, ...state.strongholds.filter(s => s.kind !== 'gate').map(s => ({ id: `obstacle:${s.id}`, x: s.x, y: s.y, owner: (s.owner ?? 0) as Side, hp: 1, maxHp: 1, built: 1, kind: 'tower' as const }))];
+  // Strategic route planning knows only legally visible enemy construction; local collision still uses all solids.
+  const structures = side === undefined || !content ? state.structures : state.structures.filter(s => s.owner === side || visibleCell(state, side, s, content));
+  return [...structures, ...state.strongholds.filter(s => s.kind !== 'gate').map(s => ({ id: `obstacle:${s.id}`, x: s.x, y: s.y, owner: (s.owner ?? 0) as Side, hp: 1, maxHp: 1, built: 1, kind: 'tower' as const }))];
 }
 function emit(state: BattleState, event: Omit<GameEvent, 'id' | 'tick'>): void {
   state.events.push({ ...event, id: state.nextId++, tick: state.tick });
@@ -278,7 +280,7 @@ function unitAbility(state: BattleState, unit: Unit, content: GameContent): void
 
 function formationGoal(state: BattleState, unit: Unit, order: Order, content: GameContent): Vec {
   const mission = missionOf(state, content);
-  const blocked = obstacles(state);
+  const blocked = obstacles(state, unit.owner, content);
   if (isNarrow(mission.map, unit.x, unit.y, blocked, unit.owner) || isNarrow(mission.map, order.x, order.y, blocked, unit.owner)) return { x: order.x, y: order.y };
   const count = state.units.filter(u => u.owner === unit.owner && u.group === unit.group).length;
   let offset = unit.group ? formationOffset(unit.slot, count, unit.formation) : { x: 0, y: 0 };
@@ -293,7 +295,7 @@ function formationGoal(state: BattleState, unit: Unit, order: Order, content: Ga
 function moveUnit(state: BattleState, unit: Unit, goal: Vec, content: GameContent, dt: number): boolean {
   const mission = missionOf(state, content), def = definition(content, unit.defId);
   if (distance(unit, goal) < .4) { unit.route = []; unit.stuck = 0; return true; }
-  const blocked = obstacles(state);
+  const blocked = obstacles(state, unit.owner, content);
   if (!unit.route.length || unit.stuck > 1.2 || !isWalkable(mission.map, unit.route[0]!.x, unit.route[0]!.y, blocked, unit.owner)) {
     unit.route = findPath(mission.map, unit, goal, blocked, unit.owner); unit.stuck = 0;
     if (!unit.route.length && isWalkable(mission.map, goal.x, goal.y, blocked, unit.owner) && distance(unit, goal) < 1.5) unit.route = [{ ...goal }];
@@ -308,7 +310,7 @@ function moveUnit(state: BattleState, unit: Unit, goal: Vec, content: GameConten
   velocity = localAvoidance(unit, velocity, nearby, .29);
   const amount = Math.min(dt, remaining / Math.max(.01, Math.hypot(velocity.x, velocity.y)));
   const next = { x: unit.x + velocity.x * amount, y: unit.y + velocity.y * amount };
-  if (isWalkable(mission.map, next.x, next.y, blocked, unit.owner) && !nearby.some(u => distance(u, next) < .26 && distance(u, unit) >= .26)) {
+  if (isWalkable(mission.map, next.x, next.y, obstacles(state), unit.owner) && !nearby.some(u => distance(u, next) < .26 && distance(u, unit) >= .26)) {
     unit.facing = Math.atan2(next.y - unit.y, next.x - unit.x); unit.x = next.x; unit.y = next.y; unit.status = 'walk'; unit.stuck = 0;
   } else { unit.stuck += dt; if (unit.stuck > .6) unit.route = []; }
   return distance(unit, goal) < .45;
