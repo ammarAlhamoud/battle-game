@@ -100,7 +100,7 @@ async function boot(): Promise<void> {
         created.initialize({ type: 'init', missionId, skills: campaign.skills, restored, startPaused: campaign.tutorial && !restored });
       } catch (error) { recover(error, token, restored ?? previousBattle); }
     },
-    onCommand(command) { session?.command(command); },
+    onCommand(command) { if (phase === 'battle') session?.command(command); },
     onBuySkill(id) {
       if (transitionBusy() || phase === 'battle') return 'Finish the current battle or transition before purchasing skills.';
       if (battle && !battle.ended) return 'Finish the saved battle before purchasing skills. Its original army must remain consistent.';
