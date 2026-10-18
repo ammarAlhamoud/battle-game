@@ -4,7 +4,7 @@ import type { BattleState, Faction, GameContent, MissionDef, SaveData, UnitDef }
 import { content } from '../src/content/index.js';
 import { createBattle, stepBattle } from '../src/sim/engine.js';
 import {
-  buySkill, createCampaign, finishMission, importSave, isMissionUnlocked,
+  buySkill, createCampaign, exportSave, finishMission, importSave, isMissionUnlocked,
   respec, validateSave,
 } from '../src/persistence/index.js';
 
@@ -68,6 +68,54 @@ function battle(ended = true, winner: 0 | 1 | null = 0): BattleState {
 }
 
 function save(): SaveData { return { version: 1, savedAt: 1000, campaign: createCampaign(), battle: battle(false, null) }; }
+
+test('new campaigns default to English while legacy version-one saves without language remain valid', async () => {
+  assert.equal(createCampaign().language, 'en');
+  const legacy = save();
+  delete legacy.campaign.language;
+  assert.deepEqual(validateSave(legacy, fixture), legacy);
+  const imported = await importSave(new File([JSON.stringify(legacy)], 'legacy.json'), fixture);
+  assert.deepEqual(imported, legacy);
+  assert.equal(imported.campaign.language, undefined);
+});
+
+test('Arabic language survives complete portable export/import without changing battle or progression', async () => {
+  const campaign = createCampaign();
+  const activeBattle = createBattle(content.missions[0], content, [], []);
+  for (let tick = 0; tick < 3; tick++) stepBattle(activeBattle, content);
+  const english: SaveData = { version: 1, savedAt: 1000, campaign, battle: activeBattle };
+  const arabic = structuredClone(english);
+  arabic.campaign.language = 'ar';
+  const blob = exportSave(arabic);
+  const restored = await importSave(new File([blob], 'arabic.json'), content);
+  assert.equal(restored.campaign.language, 'ar');
+  assert.deepEqual(restored.battle, english.battle);
+  assert.deepEqual(restored, arabic);
+  assert.equal(english.campaign.language, 'en');
+  restored.campaign.language = 'en';
+  assert.deepEqual(restored, english);
+});
+
+test('language settings accept only exact English and Arabic codes', () => {
+  for (const language of ['fr', 'AR', '', null, 0, false, {}, []]) {
+    const input = save();
+    (input.campaign as unknown as Record<string, unknown>).language = language;
+    assert.throws(() => validateSave(input, fixture), /campaign.language/);
+  }
+});
+
+test('language changes leave skill costs, rewards, resources and unlocks identical', () => {
+  const english = createCampaign();
+  const arabic = createCampaign(); arabic.language = 'ar';
+  assert.equal(buySkill(english, 'basic', fixture), null);
+  assert.equal(buySkill(arabic, 'basic', fixture), null);
+  const englishBattle = battle();
+  const arabicBattle = structuredClone(englishBattle);
+  assert.deepEqual(finishMission(english, englishBattle, fixture), finishMission(arabic, arabicBattle, fixture));
+  assert.deepEqual(englishBattle, arabicBattle);
+  assert.equal(isMissionUnlocked(english, 'e2m1', fixture), isMissionUnlocked(arabic, 'e2m1', fixture));
+  assert.deepEqual({ ...arabic, language: 'en' }, english);
+});
 
 test('mission unlocks require the preceding victory and preserve replay access', () => {
   const campaign = createCampaign();

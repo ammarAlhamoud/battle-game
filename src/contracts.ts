@@ -84,6 +84,7 @@ export type Command =
   | { type: 'build'; side: Side; ids: string[]; kind: 'barrier' | 'tower'; x: number; y: number };
 export interface ProgressRecord { bestScore: number; claimed: number[]; victory: boolean }
 export interface Campaign {
+  language?: 'en' | 'ar';
   version: 1; records: Record<string, ProgressRecord>; points: number; skills: string[];
   selectedEra: number; tutorial: boolean; totalEarned: number;
 }

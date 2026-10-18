@@ -11,7 +11,7 @@ const DB_VERSION = 1;
 const STORE = 'snapshots';
 
 export function createCampaign(): Campaign {
-  return { version: 1, records: {}, points: INITIAL_POINTS, skills: [], selectedEra: 0, tutorial: true, totalEarned: INITIAL_POINTS };
+  return { version: 1, records: {}, points: INITIAL_POINTS, skills: [], selectedEra: 0, tutorial: true, totalEarned: INITIAL_POINTS, language: 'en' };
 }
 
 export function isMissionUnlocked(campaign: Campaign, missionId: string, data: GameContent): boolean {
@@ -140,7 +140,7 @@ export function validateSave(value: unknown, data: GameContent): SaveData {
   const root = obj(value, 'save', ['version', 'savedAt', 'campaign', 'battle']);
   choice(root.version, [1], 'version');
   int(root.savedAt, 'savedAt', 0, 8.64e15);
-  const campaign = obj(root.campaign, 'campaign', ['version', 'records', 'points', 'skills', 'selectedEra', 'tutorial', 'totalEarned']);
+  const campaign = obj(root.campaign, 'campaign', ['version', 'records', 'points', 'skills', 'selectedEra', 'tutorial', 'totalEarned', 'language']);
   choice(campaign.version, [1], 'campaign.version');
   const missions = new Map(data.missions.map(m => [m.id, m]));
   const skillDefs = new Map(data.skills.map(s => [s.id, s]));
@@ -149,6 +149,7 @@ export function validateSave(value: unknown, data: GameContent): SaveData {
   const earned = int(campaign.totalEarned, 'campaign.totalEarned', 0, 10_000);
   int(campaign.selectedEra, 'campaign.selectedEra', 0, data.eras.length - 1);
   bool(campaign.tutorial, 'campaign.tutorial');
+  if (campaign.language !== undefined) choice(campaign.language, ['en', 'ar'], 'campaign.language');
   let rewardCount = 0;
   const records = dictionary(campaign.records, 'campaign.records', (v, path, id) => {
     const mission = missions.get(id);
