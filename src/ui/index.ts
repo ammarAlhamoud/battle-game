@@ -149,7 +149,7 @@ export function mountUI(options: UIOptions): GameUI {
       append(choice, element('span', 'language-code', language === 'ar' ? 'ع' : 'Aa'), append(element('span', 'language-choice-copy'), element('strong', '', title), element('small', '', subtitle)), svgIcon('check')); append(languages, choice);
     }
     append(dialog, languages, element('p', 'settings-save-note', 'Your preference is saved automatically.'));
-    const display = element('div', 'settings-row'); append(display, element('span', '', 'Fullscreen'), withIcon(button('Fullscreen ⛶', () => run(async () => { if (document.fullscreenElement) await document.exitFullscreen(); else await parent.requestFullscreen(); }), 'secondary'), 'expand'));
+    const display = element('div', 'settings-row'); append(display, element('span', '', 'Fullscreen'), withIcon(button('Fullscreen', () => run(async () => { if (document.fullscreenElement) await document.exitFullscreen(); else await parent.requestFullscreen(); }), 'secondary'), 'expand'));
     append(dialog, display, button('Done', closeModal, 'primary'));
   }
   function confirmLeave() {
@@ -176,9 +176,9 @@ export function mountUI(options: UIOptions): GameUI {
     const fileInput = element('input'); fileInput.type = 'file'; fileInput.accept = '.json,application/json'; fileInput.hidden = true;
     fileInput.onchange = () => { const file = fileInput.files?.[0]; if (file) run(() => options.onImport(file), 'Save imported. Your campaign is ready.'); fileInput.value = ''; };
     append(bar, withIcon(button('Export save', () => run(options.onExport)), 'upload'), withIcon(button('Import save', () => fileInput.click()), 'download'), fileInput);
-    const offlineButton = withIcon(button('↓ Download all eras', () => {
+    const offlineButton = withIcon(button('Download all eras', () => {
       offlineButton.disabled = true;
-      run(async () => { try { await options.onOffline(value => { setText(offlineButton, `Downloading ${Math.round(value)}%`); }); setText(offlineButton, '✓ All eras available offline'); } catch (error) { setText(offlineButton, '↓ Retry offline download'); throw error; } finally { offlineButton.disabled = false; } });
+      run(async () => { try { await options.onOffline(value => { setText(offlineButton, `Downloading ${Math.round(value)}%`); }); setText(offlineButton, 'All eras available offline'); offlineButton.querySelector('svg')?.replaceWith(svgIcon('check')); } catch (error) { setText(offlineButton, 'Retry offline download'); offlineButton.querySelector('svg')?.replaceWith(svgIcon('download')); throw error; } finally { offlineButton.disabled = false; } });
     }), 'download'); offlineButton.dataset.testid = 'download-offline'; append(bar, offlineButton);
     return bar;
   }
@@ -192,7 +192,7 @@ export function mountUI(options: UIOptions): GameUI {
     const navCampaign = withIcon(button('Campaign', renderCampaign, 'nav-item active'), 'campaign'); navCampaign.setAttribute('aria-current','page');
     const navSkills = withIcon(button('Civilization', openSkills, 'nav-item'), 'tree');
     const navSettings=withIcon(button('Settings', settings, 'nav-item'), 'settings'); navSettings.dataset.testid='settings';
-    append(navigation, navCampaign, navSkills, withIcon(button('Field guide ↗',help,'nav-item'),'guide'),navSettings); append(sidebar,navigation);
+    append(navigation, navCampaign, navSkills, withIcon(button('Field guide',help,'nav-item'),'guide'),navSettings); append(sidebar,navigation);
     const wins=Object.values(campaign.records).filter(record=>record.victory).length;
     const progress=element('div','sidebar-progress'); append(progress,element('p','eyebrow','Campaign progress'),element('strong','',`${wins} / 40`));
     const bar=element('progress');bar.max=40;bar.value=wins;localAttribute(bar,'aria-label','Campaign progress');append(progress,bar,element('p','','FORTY BATTLES. EIGHT ERAS. YOUR LEGACY.'));append(sidebar,progress);
@@ -220,7 +220,7 @@ export function mountUI(options: UIOptions): GameUI {
     append(featureCopy, element('p', 'eyebrow hero-eyebrow', `THE ${ROMAN[eraIndex]} AGE  /  ${era.years}`), element('h1', '', era.name), element('p', 'era-subtitle', era.subtitle), element('p', 'era-description', era.description));
     const missionTeaser = element('div', 'next-mission');
     append(missionTeaser, label(missionUnlocked(selected) ? (campaign.records[selected.id]?.victory ? 'RETURN TO THE FIELD' : 'YOUR NEXT COMMAND') : 'THE NEXT CHAPTER', 'eyebrow'), element('h3', '', selected.name));
-    const start = button(missionUnlocked(selected) ? `${campaign.records[selected.id]?.victory ? 'Replay' : 'Begin'} battle  →` : 'Complete the previous age to unlock', () => options.onStart(selected.id, false), 'primary'); start.disabled = !missionUnlocked(selected); start.dataset.testid = 'start-battle';
+    const start = button(missionUnlocked(selected) ? `${campaign.records[selected.id]?.victory ? 'Replay' : 'Begin'} battle` : 'Complete the previous age to unlock', () => options.onStart(selected.id, false), 'primary'); start.disabled = !missionUnlocked(selected); start.dataset.testid = 'start-battle';
     start.append(svgIcon('arrow','directional'));append(missionTeaser, start);
     if (savedBattle && !savedBattle.ended) {
       const resumeMission = content.missions.find(item => item.id === savedBattle?.missionId);
@@ -240,7 +240,7 @@ export function mountUI(options: UIOptions): GameUI {
       const cardTop = element('div', 'mission-card-top'); append(cardTop, label(String(item.index + 1).padStart(2, '0'), 'mission-number'), label(record?.victory ? '✓ COMPLETE' : unlocked ? 'AVAILABLE' : 'LOCKED', 'mission-state'));
       const preview=element('div','mission-preview');append(preview,mapPreview(item));const pin=element('span','mission-preview-marker');pin.append(svgIcon(record?.victory?'check':unlocked?'flag':'lock'));preview.append(pin);
       append(card, preview,cardTop, element('h3', '', item.name), element('p', '', item.subtitle));
-      const bottom = element('div', 'mission-card-bottom'); append(bottom, label(item.finale ? 'ERA FINALE ✦' : `BATTLE ${item.index + 1}`, item.finale ? 'finale-tag' : ''), label(record?.bestScore ? `${number(record.bestScore)} SCORE` : unlocked ? 'VIEW BRIEFING ↗' : '⌑')); append(card, bottom); append(cards, card);
+      const bottom = element('div', 'mission-card-bottom'); append(bottom, label(item.finale ? 'ERA FINALE ✦' : `BATTLE ${item.index + 1}`, item.finale ? 'finale-tag' : ''), record?.bestScore ? label(`${number(record.bestScore)} SCORE`) : unlocked ? label('VIEW BRIEFING ↗') : svgIcon('lock')); append(card, bottom); append(cards, card);
     }); append(page, cards);
     const footer = element('footer', 'campaign-footer'); append(footer, append(element('div','save-status'),element('i','status-dot'),label('All progress is saved automatically.','footer-note')), utilityBar()); append(page, footer);
     append(shell,sidebar,page);append(root,shell);
@@ -269,7 +269,7 @@ export function mountUI(options: UIOptions): GameUI {
     const missionHeading = element('div', 'battle-mission'); append(missionHeading, element('small', '', `${ROMAN[found.era]} / ${String(found.index + 1).padStart(2, '0')}`), element('strong', '', found.name)); append(top, missionHeading);
     const telemetry = element('div', 'telemetry');
     for (const [key, caption] of [['supplies', 'SUPPLIES'], ['army', 'ARMY'], ['score', 'SCORE'], ['time', 'TIME']]) { const item = stat(caption!, '—'); item.dataset.stat = key; item.prepend(svgIcon(key==='time'?'clock':key as IconName)); append(telemetry, item); }
-    pauseButton = withIcon(button('Ⅱ Pause', () => { if (state) send({ type: 'pause', value: !state.paused }); }, 'pause-button', 'Tactical pause (Space)'), 'pause');
+    pauseButton = withIcon(button('Pause', () => { if (state) send({ type: 'pause', value: !state.paused }); }, 'pause-button', 'Tactical pause (Space)'), 'pause');
     pauseButton.dataset.testid = 'pause';
     const battleSettings=withIcon(button('',settings,'icon-button','Settings'),'settings');battleSettings.dataset.testid='battle-settings';
     append(top, telemetry, pauseButton, withIcon(button('Civilization', openSkills, 'quiet-button'),'tree'), battleSettings,withIcon(button('', battleMenu, 'icon-button', 'Battle menu'),'menu'));
@@ -313,7 +313,11 @@ export function mountUI(options: UIOptions): GameUI {
     renderer?.setState(next); renderer?.setSelection(selection);
     const values: Record<string, string> = { supplies: number(next.factions[0].resources), army: `${usage(next, 0, content)} / ${capacity(next, 0, content)}`, score: number(next.factions[0].score), time: clock(next.time) };
     for (const [key, value] of Object.entries(values)) { const item = top?.querySelector(`[data-stat="${key}"] strong`); if (item) setText(item, value); }
-    if (pauseButton) { setText(pauseButton, next.paused ? '▷ Resume' : 'Ⅱ Pause'); pauseButton.classList.toggle('is-paused', next.paused); pauseButton.setAttribute('aria-pressed', String(next.paused)); }
+    if (pauseButton) {
+      setText(pauseButton, next.paused ? 'Resume' : 'Pause');
+      if (pauseButton.getAttribute('aria-pressed') !== String(next.paused)) pauseButton.querySelector('svg')?.replaceWith(svgIcon(next.paused ? 'play' : 'pause'));
+      pauseButton.classList.toggle('is-paused', next.paused); pauseButton.setAttribute('aria-pressed', String(next.paused));
+    }
     battleRoot?.classList.toggle('tactical-pause', next.paused);
     const indicator=battleRoot?.querySelector<HTMLElement>('.pause-indicator');if(indicator)indicator.hidden=!next.paused;
     const fp = contextKey(); if (fp !== panelFingerprint) { panelFingerprint = fp; renderContext(); }

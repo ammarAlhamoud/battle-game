@@ -1,6 +1,8 @@
 /** Interface copy. Content names and authored briefings live in content-ar.ts. */
 export const arMessages: Readonly<Record<string, string>> = {
   'Aa': 'Aa', 'Fullscreen': 'ملء الشاشة',
+  'Field guide': 'الدليل الميداني',
+  'All eras available offline': 'جميع العصور متاحة دون اتصال', 'Retry offline download': 'إعادة محاولة التنزيل',
   'TACTICAL PAUSE · PLAN FREELY': 'إيقاف تكتيكي · خطط بحرية',
   'PLAN FREELY': 'خطط بحرية', 'Pause': 'إيقاف', 'Resume': 'استئناف',
   'EIGHTFOLD': 'EIGHTFOLD',
