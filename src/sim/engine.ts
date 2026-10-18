@@ -233,7 +233,7 @@ function damageAmount(state: BattleState, attacker: Unit, target: Unit, content:
   const terrain = terrainModifiers(terrainAt(mission.map, target.x, target.y));
   const skillDamage = effect(state, attacker.owner, content, 'damage'), skillArmor = effect(state, target.owner, content, 'armor');
   const highGround = terrainAt(mission.map, attacker.x, attacker.y) === '^' && terrainAt(mission.map, target.x, target.y) !== '^' ? 1.12 : 1;
-  const stealth = attack.stealth && attacker.cooldown <= 0 && !unitVisible(state, attacker, target.owner, content) ? 1.35 + effect(state, attacker.owner, content, 'stealth') : 1;
+  const stealth = attack.stealth && attacker.cooldown <= 0 && !unitVisible(state, attacker, target.owner, content) ? 1.35 : 1;
   const armor = defense.armor + defending.armor + skillArmor;
   return Math.max(1, (attack.damage * (attack.counters[defense.role] ?? 1) * formation.damage * (1 + skillDamage) * highGround * multiplier * stealth - armor * .65) * (1 - terrain.cover));
 }
@@ -349,7 +349,7 @@ function updateUnit(state: BattleState, unit: Unit, content: GameContent, dt: nu
   const enemyStructure = state.structures.filter(s => s.owner !== unit.owner && s.hp > 0 && visibleCell(state, unit.owner, s, content) && distance(unit, s) <= range).sort((a, b) => distance(unit, a) - distance(unit, b))[0];
   if (enemyStructure) {
     unit.status = 'attack'; unit.facing = Math.atan2(enemyStructure.y - unit.y, enemyStructure.x - unit.x);
-    if (unit.cooldown <= 0) { unit.cooldown = def.attackTime; enemyStructure.hp -= def.damage * (def.role === 'siege' ? 2.4 + effect(state, unit.owner, content, 'siege') : 1); emit(state, { kind: 'hit', owner: unit.owner, x: enemyStructure.x, y: enemyStructure.y }); }
+    if (unit.cooldown <= 0) { unit.cooldown = def.attackTime; enemyStructure.hp -= def.damage * (def.role === 'siege' ? 2.4 : 1); emit(state, { kind: 'hit', owner: unit.owner, x: enemyStructure.x, y: enemyStructure.y }); }
     return;
   }
   if (target && (order?.kind === 'attack' || !order) && distance(unit, target) <= def.vision) { moveUnit(state, unit, target, content, dt); return; }
