@@ -74,11 +74,13 @@ async function boot(): Promise<void> {
     },
     onCommand(command) { send({ type: 'command', command }); },
     onBuySkill(id) {
+      if (battle && !battle.ended) return 'Finish the saved battle before purchasing skills. Its original army must remain consistent.';
       const error = buySkill(campaign, id, content, inBattle);
       if (!error) { ui.setCampaign(campaign, battle); void persist().catch(e => ui.notify(`Save failed: ${String(e)}`)); }
       return error;
     },
     onRespec() {
+      if (battle && !battle.ended) return 'Finish the saved battle before resetting skills.';
       const error = respec(campaign, content, inBattle);
       if (!error) { ui.setCampaign(campaign, battle); void persist().catch(e => ui.notify(`Save failed: ${String(e)}`)); }
       return error;

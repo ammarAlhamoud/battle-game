@@ -98,6 +98,13 @@ export function mountUI(options: UIOptions): GameUI {
     const dialog = openModal('Return to the campaign');
     append(dialog, element('p', 'modal-copy', 'Your battle will be saved at this exact point. You can resume it from the campaign.'), button('Save & return to campaign', () => { closeModal(); options.onLeave(); }, 'primary'));
   }
+  function confirmConcede() {
+    if (!state || state.ended) return;
+    const dialog = openModal('Concede this battle');
+    append(dialog, element('p', 'modal-copy', 'End this attempt as a defeat. Your campaign progress is retained. Eligible score rewards can be claimed once; previously claimed rewards are never repeated. You can redistribute knowledge before your next attempt.'));
+    const confirm = button('Concede & review results', () => { if (!state || state.ended) return closeModal(); send({ type: 'surrender', side: 0 }); closeModal(); }, 'primary'); confirm.dataset.testid = 'confirm-concede';
+    append(dialog, confirm, button('Continue this battle', closeModal, 'secondary'));
+  }
   function help() {
     const dialog = openModal('A field guide to command', 'guide-modal');
     append(dialog, element('p', 'modal-copy', 'Capture the enemy main stronghold. Earn supplies from defeated units and first captures; there is no passive income. Your opponent follows the same rules.'));
@@ -113,7 +120,7 @@ export function mountUI(options: UIOptions): GameUI {
     append(bar, button('Field guide ↗', help), button('Export save', () => run(options.onExport)), button('Import save', () => fileInput.click()), fileInput);
     const offlineButton = button('↓ Download all eras', () => {
       offlineButton.disabled = true;
-      run(async () => { try { await options.onOffline(value => { offlineButton.textContent = `Downloading ${Math.round(value <= 1 ? value * 100 : value)}%`; }); offlineButton.textContent = '✓ All eras available offline'; } catch (error) { offlineButton.textContent = '↓ Retry offline download'; throw error; } finally { offlineButton.disabled = false; } });
+      run(async () => { try { await options.onOffline(value => { offlineButton.textContent = `Downloading ${Math.round(value)}%`; }); offlineButton.textContent = '✓ All eras available offline'; } catch (error) { offlineButton.textContent = '↓ Retry offline download'; throw error; } finally { offlineButton.disabled = false; } });
     }); offlineButton.dataset.testid = 'download-offline'; append(bar, offlineButton);
     append(bar, button('Fullscreen ⛶', () => run(async () => { if (document.fullscreenElement) await document.exitFullscreen(); else await parent.requestFullscreen(); })));
     return bar;
@@ -207,7 +214,8 @@ export function mountUI(options: UIOptions): GameUI {
   }
   function battleMenu() {
     const dialog = openModal('Command desk', 'battle-menu');
-    append(dialog, element('p', 'modal-copy', 'The field continues while this menu is open. Use tactical pause whenever you need time to think.'), button('Field guide & controls', help, 'secondary'), button('Save now', () => run(options.onSave, 'Battle saved.'), 'secondary'), button('Export complete save', () => run(options.onExport), 'secondary'), button('Fullscreen ⛶', () => run(async () => { if (document.fullscreenElement) await document.exitFullscreen(); else await parent.requestFullscreen(); }), 'secondary'), button('Return to campaign', confirmLeave, 'primary'));
+    const concede = button('Concede battle', confirmConcede, 'secondary'); concede.disabled = !state || state.ended; concede.dataset.testid = 'concede-battle';
+    append(dialog, element('p', 'modal-copy', 'The field continues while this menu is open. Use tactical pause whenever you need time to think.'), button('Field guide & controls', help, 'secondary'), button('Save now', () => run(options.onSave, 'Battle saved.'), 'secondary'), button('Export complete save', () => run(options.onExport), 'secondary'), button('Fullscreen ⛶', () => run(async () => { if (document.fullscreenElement) await document.exitFullscreen(); else await parent.requestFullscreen(); }), 'secondary'), concede, button('Return to campaign', confirmLeave, 'primary'));
   }
   function renderTutorial() {
     battleRoot?.querySelector('.tutorial-card')?.remove(); if (!battleRoot || !tutorialOpen || screen !== 'battle') return;
@@ -240,13 +248,18 @@ export function mountUI(options: UIOptions): GameUI {
     const faction = state.factions[0];
     return JSON.stringify([selection.units, selection.stronghold, state.paused, selected.map(unit => [unit.defId, unit.formation, unit.orders]), stronghold?.owner, stronghold?.capturing, faction.lines.map(line => [line.id, line.blocked, line.queue.map(job => [job.id, job.started])]), faction.reserves, faction.autoDeploy, faction.skills]);
   }
+  function unitSummary(selected: Unit[]) {
+    const health = `${number(selected.reduce((sum, unit) => sum + unit.hp, 0))} / ${number(selected.reduce((sum, unit) => sum + (definitions.get(unit.defId)?.hp ?? unit.hp), 0))} health`;
+    const def = definitions.get(selected[0]?.defId ?? '');
+    return selected.length === 1 && def ? `${health} · ${def.damage} damage · ${def.armor} armor · ${def.range} range · ${def.vision} vision` : `${health} · ${[...new Set(selected.map(unit => definitions.get(unit.defId)?.role))].join(', ')}`;
+  }
   function patchContext() {
     if (!contextual || !state) return;
     const faction = state.factions[0];
     const selected = ownUnits();
     if (selected.length) {
       const health = contextual.querySelector('[data-health]');
-      if (health) health.textContent = `${number(selected.reduce((sum, unit) => sum + unit.hp, 0))} / ${number(selected.reduce((sum, unit) => sum + (definitions.get(unit.defId)?.hp ?? unit.hp), 0))} health · ${[...new Set(selected.map(unit => definitions.get(unit.defId)?.role))].join(', ')}`;
+      if (health) health.textContent = unitSummary(selected);
       const unitAbility = contextual.querySelector<HTMLButtonElement>('[data-unit-ability]'); if (unitAbility) { const cooldown = selected[0]!.abilityCooldown; unitAbility.textContent = cooldown > 0 ? `Ability ${Math.ceil(cooldown)}s` : 'Unit ability · Q'; unitAbility.disabled = selected.every(unit => unit.abilityCooldown > 0) || faction.resources < 4; }
     }
     for (const node of contextual.querySelectorAll<HTMLButtonElement>('[data-ability]')) { const ability = node.dataset.ability as 'rally' | 'recon' | 'volley'; const cooldown = faction.cooldowns[ability] ?? 0; node.textContent = `${titleCase(ability)} · ${cooldown > 0 ? `${Math.ceil(cooldown)}s` : `${RULES.abilityCosts[ability]} supplies`}`; node.disabled = cooldown > 0 || faction.resources < RULES.abilityCosts[ability]; }
@@ -293,8 +306,7 @@ export function mountUI(options: UIOptions): GameUI {
   function renderUnitPanel(selected: Unit[]) {
     if (!contextual || !state) return;
     const lead = selected[0]!; const def = definitions.get(lead.defId)!;
-    const totalHP = selected.reduce((sum, unit) => sum + unit.hp, 0); const maximum = selected.reduce((sum, unit) => sum + (definitions.get(unit.defId)?.hp ?? unit.hp), 0);
-    const heading = panelHeading(selected.length === 1 ? def.name : `${selected.length} soldiers selected`, 'FIELD COMMAND', `${number(totalHP)} / ${number(maximum)} health · ${[...new Set(selected.map(unit => definitions.get(unit.defId)?.role))].join(', ')}`);
+    const heading = panelHeading(selected.length === 1 ? def.name : `${selected.length} soldiers selected`, 'FIELD COMMAND', unitSummary(selected));
     heading.querySelector('p')!.dataset.health = '';
     append(heading, button('Clear ×', () => { selection = { units: [], stronghold: null }; renderer?.setSelection(selection); renderContext(); }, 'text-button')); append(contextual, heading);
     const body = element('div', 'unit-panel-body');
@@ -347,7 +359,7 @@ export function mountUI(options: UIOptions): GameUI {
     const kind = element('select'); for (const name of ['move', 'attack', 'defend', 'capture', 'rally'] as const) { const option = element('option', '', titleCase(name)); option.value = name; append(kind, option); } kind.value = existing.kind;
     const x = element('input'); x.type = 'number'; x.min = '0'; x.max = String(mission.map[0]!.length - 1); x.step = '1'; x.value = String(Math.round(existing.x)); x.required = true;
     const y = element('input'); y.type = 'number'; y.min = '0'; y.max = String(mission.map.length - 1); y.step = '1'; y.value = String(Math.round(existing.y)); y.required = true;
-    const field = (name: string, control: HTMLElement) => append(element('label', 'form-field'), label(name), control);
+    const field = (name: string, control: HTMLElement) => { control.setAttribute('aria-label', name); return append(element('label', 'form-field'), label(name), control); };
     append(form, field('ORDER', kind), field('MAP X', x), field('MAP Y', y));
     const submit = element('button', 'primary', index === null ? 'Add to plan' : 'Update plan'); submit.type = 'submit';
     append(form, element('p', 'form-note', `Applies this plan to ${ids.length} selected soldier${ids.length === 1 ? '' : 's'}. You can also append orders with Shift + right-click.`), submit);
@@ -390,7 +402,7 @@ export function mountUI(options: UIOptions): GameUI {
     const body = element('div', 'production-body'); const roster = element('div', 'recruit-roster');
     const units = unlockedUnits(state, 0, content);
     for (const unit of units) {
-      const card = button('', () => send({ type: 'recruit', side: 0, unitId: unit.id }), 'recruit-card', unit.description);
+      const card = button('', () => send({ type: 'recruit', side: 0, unitId: unit.id }), 'recruit-card', `${unit.description}\n${unit.hp} health · ${unit.damage} damage · ${unit.armor} armor · ${unit.range} range · ${unit.vision} vision`);
       card.dataset.recruit = unit.id; card.dataset.testid = `recruit-${unit.id}`;
       const icon = element('span', `unit-role-icon ${unit.role}`, roleIcon(unit));
       const trainingBonus = content.skills.reduce((total, skill) => total + (faction.skills.includes(skill.id) && skill.effect === 'training' && (skill.era === null || skill.era === mission!.era) ? skill.value : 0), 0);
@@ -482,12 +494,13 @@ export function mountUI(options: UIOptions): GameUI {
 
   function openSkills() {
     const dialog = openModal('The civilization tree', 'skills-modal'); let skillEra = mission?.era ?? eraIndex; let zoom = 1;
+    const activeAttempt = screen === 'battle' || !!savedBattle && !savedBattle.ended;
     const intro = element('div', 'skill-intro');
-    append(intro, element('p', '', screen === 'battle' ? 'Inspect your civilization while on the field. Purchase and respec between missions.' : 'Build a civilization, one decision at a time. Permanent knowledge crosses the ages; era knowledge shapes its army.'), stat('AVAILABLE KNOWLEDGE', `${campaign.points} SP`)); append(dialog, intro);
+    append(intro, element('p', '', activeAttempt ? 'Inspect your civilization at any time. Finish or concede the active battle before purchasing knowledge or redistributing skills.' : 'Build a civilization, one decision at a time. Permanent knowledge crosses the ages; era knowledge shapes its army.'), stat('AVAILABLE KNOWLEDGE', `${campaign.points} SP`)); append(dialog, intro);
     const tools = element('div', 'skill-toolbar');
     const filters = element('select'); filters.setAttribute('aria-label', 'Era skill branch'); content.eras.forEach((era, index) => { const option = element('option', '', `${ROMAN[index]} · ${era.name}`); option.value = String(index); append(filters, option); }); filters.value = String(skillEra);
     const zoomOut = button('−', () => applyZoom(Math.max(0.55, zoom - 0.15)), 'small-button', 'Zoom out'); const zoomIn = button('+', () => applyZoom(Math.min(1.75, zoom + 0.15)), 'small-button', 'Zoom in');
-    const respec = button('Respec · 1 SP', () => { const error = options.onRespec(); if (error) notify(error); else { notify('Knowledge refunded. Respec cost: 1 SP.'); drawTree(); } }, 'secondary'); respec.disabled = screen === 'battle';
+    const respec = button('Respec · 1 SP', () => { const error = options.onRespec(); if (error) notify(error); else { notify('Knowledge refunded. Respec cost: 1 SP.'); drawTree(); } }, 'secondary'); respec.disabled = activeAttempt;
     append(tools, filters, label('DRAG TO PAN · SCROLL TO EXPLORE', 'eyebrow'), zoomOut, zoomIn, respec); append(dialog, tools);
     const scroll = element('div', 'skill-scroll'); const space = element('div', 'skill-space'); const tree = element('div', 'skill-tree'); append(space, tree); append(scroll, space); append(dialog, scroll);
     let dragging = false; let start: Vec = { x: 0, y: 0 }; let scrollStart: Vec = { x: 0, y: 0 };
@@ -522,8 +535,8 @@ export function mountUI(options: UIOptions): GameUI {
       const header = element('div', 'skill-detail-header'); append(header, element('h3', '', skill.name), button('×', () => detail.remove(), 'icon-button', 'Close skill details')); append(detail, header, element('p', '', skill.description));
       if (missing.length) append(detail, element('p', 'requirements', `REQUIRES: ${missing.map(id => content.skills.find(item => item.id === id)?.name ?? id).join(', ')}`));
       if (!eraUnlocked) append(detail, element('p', 'requirements', 'REACH THIS ERA TO PURCHASE ITS KNOWLEDGE.'));
-      const buy = button(bought ? '✓ Knowledge acquired' : screen === 'battle' ? 'Purchase between missions' : `Learn · ${skill.cost} SP`, () => { const error = options.onBuySkill(skill.id); if (error) notify(error); else { redraw(); showSkill(skill, redraw); } }, 'primary');
-      buy.disabled = bought || screen === 'battle' || missing.length > 0 || !eraUnlocked || campaign.points < skill.cost; append(detail, buy); append(dialog, detail);
+      const buy = button(bought ? '✓ Knowledge acquired' : activeAttempt ? 'Finish the active battle to purchase' : `Learn · ${skill.cost} SP`, () => { const error = options.onBuySkill(skill.id); if (error) notify(error); else { redraw(); showSkill(skill, redraw); } }, 'primary');
+      buy.disabled = bought || activeAttempt || missing.length > 0 || !eraUnlocked || campaign.points < skill.cost; append(detail, buy); append(dialog, detail);
     }
     drawTree();
   }

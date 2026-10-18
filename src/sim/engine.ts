@@ -178,6 +178,7 @@ export function applyCommand(state: BattleState, command: Command, content: Game
   const side = command.side, f = state.factions[side]; if (!f) return;
   const selected = 'ids' in command ? state.units.filter(u => u.owner === side && u.hp > 0 && command.ids.includes(u.id)) : [];
   switch (command.type) {
+    case 'surrender': finish(state, other(side), content); break;
     case 'order': {
       if (!validPoint(missionOf(state, content), command.order)) break;
       const group = state.nextId++;
@@ -393,11 +394,11 @@ function captures(state: BattleState, content: GameContent, dt: number): void {
     const rate = Math.min(3.5, Math.abs(advantage)) * (stronghold.kind === 'main' ? RULES.mainCaptureRate : RULES.captureRate) * dt;
     if (stronghold.owner === side) { stronghold.progress = Math.max(0, stronghold.progress - rate * 1.2); if (!stronghold.progress) stronghold.capturing = null; continue; }
     if (stronghold.capturing !== null && stronghold.capturing !== side && stronghold.progress > 0) { stronghold.progress = Math.max(0, stronghold.progress - rate); if (!stronghold.progress) stronghold.capturing = null; continue; }
-    stronghold.capturing = side; stronghold.progress = Math.min(100, stronghold.progress + rate);
     if (stronghold.owner !== null && stronghold.owner !== side && stronghold.capturing === null && stronghold.progress === 0) {
       const recent = state.events.some(e => e.kind === 'alert' && e.owner === stronghold.owner && distance(e, stronghold) < .1 && state.tick - e.tick < 100);
       if (!recent) emit(state, { kind: 'alert', owner: stronghold.owner, x: stronghold.x, y: stronghold.y, text: `${stronghold.name} is under occupation` });
     }
+    stronghold.capturing = side; stronghold.progress = Math.min(100, stronghold.progress + rate);
     if (stronghold.progress < 100) continue;
     const wasMain = stronghold.kind === 'main'; stronghold.owner = side; stronghold.progress = 0; stronghold.capturing = null;
     const f = state.factions[side];

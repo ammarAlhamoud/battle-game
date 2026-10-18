@@ -70,6 +70,7 @@ export interface BattleState {
 }
 export type Command =
   | { type: 'pause'; value: boolean }
+  | { type: 'surrender'; side: Side }
   | { type: 'order'; side: Side; ids: string[]; order: Order; append?: boolean }
   | { type: 'editOrders'; side: Side; ids: string[]; orders: Order[] }
   | { type: 'formation'; side: Side; ids: string[]; formation: Formation }
