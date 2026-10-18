@@ -81,7 +81,9 @@ def building(era):
         s+=block(0,-105,17,8,17,('#eed7b3','#aca37c','#d2bf94'))
     elif era==2:
         s+=block(0,17,120,52,13,stone)+block(0,-1,101,42,12,stone)
-        for x in [-74,-45,-15,15,45,74]:s+=line(x,-69,x,-8,'#efe4c2',13)+line(x-8,-68,x+8,-68,'#c1c5a3',4)+line(x-8,-8,x+8,-8,'#adb797',4)
+        for x in [-74,-45,-15,15,45,74]:
+            top=-20-abs(x)*.45;bottom=77-abs(x)*.43
+            s+=line(x,top,x,bottom,'#efe4c2',13)+line(x-8,top,x+8,top,'#c1c5a3',4)+line(x-8,bottom,x+8,bottom,'#adb797',4)
         s+=poly([(-116,-73),(0,-142),(116,-73),(0,-20)],'#eee2bf')+poly([(-116,-73),(0,-142),(0,-105)],'#9dad92')+poly([(0,-142),(116,-73),(0,-20),(0,-44),(90,-83)],'#c6cbab')
         s+=poly([(-55,-69),(0,-99),(55,-69),(0,-43)],'#d5d6b4')
     elif era==3:
