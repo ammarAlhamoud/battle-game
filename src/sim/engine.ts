@@ -179,9 +179,9 @@ export function applyCommand(state: BattleState, command: Command, content: Game
     case 'order': {
       if (!validPoint(missionOf(state, content), command.order)) break;
       const group = state.nextId++;
-      selected.forEach((u, index) => { const order = cloneOrder(command.order); u.orders = command.append ? [...u.orders, order].slice(0, 32) : [order]; if (!command.append) u.route = []; u.group = group; u.slot = index; u.targetId = undefined; }); break;
+      selected.forEach((u, index) => { const order = cloneOrder(command.order); u.orders = command.append ? [...u.orders, order].slice(0, 32) : [order]; if (!command.append) u.route = []; u.group = group; u.slot = index; delete u.targetId; }); break;
     }
-    case 'editOrders': selected.forEach(u => { u.orders = command.orders.filter(o => validPoint(missionOf(state, content), o)).slice(0, 32).map(cloneOrder); u.route = []; u.targetId = undefined; }); break;
+    case 'editOrders': selected.forEach(u => { u.orders = command.orders.filter(o => validPoint(missionOf(state, content), o)).slice(0, 32).map(cloneOrder); u.route = []; delete u.targetId; }); break;
     case 'formation': {
       if (!['line', 'column', 'wedge', 'spread', 'shield'].includes(command.formation)) break;
       if ((command.formation === 'shield' || command.formation === 'wedge' || command.formation === 'spread') && !hasEffect(state, side, content, 'formations')) break;
@@ -335,7 +335,7 @@ function construction(state: BattleState, unit: Unit, order: Order, content: Gam
 function updateUnit(state: BattleState, unit: Unit, content: GameContent, dt: number): void {
   if (unit.hp <= 0) return;
   const def = definition(content, unit.defId), mission = missionOf(state, content), order = unit.orders[0];
-  unit.cooldown = Math.max(0, unit.cooldown - dt); unit.abilityCooldown = Math.max(0, unit.abilityCooldown - dt); unit.targetId = undefined;
+  unit.cooldown = Math.max(0, unit.cooldown - dt); unit.abilityCooldown = Math.max(0, unit.abilityCooldown - dt); delete unit.targetId;
   if (order?.kind === 'ability') { unitAbility(state, unit, content); unit.orders.shift(); unit.route = []; return; }
   const range = Math.max(.8, def.range + terrainModifiers(terrainAt(mission.map, unit.x, unit.y)).range);
   const enemies = state.units.filter(e => e.owner !== unit.owner && e.hp > 0 && unitVisible(state, e, unit.owner, content));
