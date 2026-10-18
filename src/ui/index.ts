@@ -90,7 +90,7 @@ export function mountUI(options: UIOptions): GameUI {
     setLanguage(language); document.documentElement.lang = language; document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
     document.title = language === 'ar' ? 'EIGHTFOLD — فن القيادة' : 'Eightfold — The Art of Command';
     localizeTree(root); localizeTree(toasts);
-    for (const control of root.querySelectorAll<HTMLElement>('[data-language]')) { const checked = control.dataset.language === language; control.classList.toggle('selected', checked); control.setAttribute('aria-checked', String(checked)); }
+    for (const control of root.querySelectorAll<HTMLElement>('[data-language]')) { const checked = control.dataset.language === language; control.classList.toggle('selected', checked); control.setAttribute('aria-checked', String(checked)); control.tabIndex = checked ? 0 : -1; }
     if (save) { campaign.language = language; options.onLanguageChange(language); }
   }
   applyLanguage(getLanguage());
@@ -146,6 +146,15 @@ export function mountUI(options: UIOptions): GameUI {
     const languages = element('div', 'language-options'); languages.setAttribute('role', 'radiogroup'); localAttribute(languages, 'aria-label', 'Interface language');
     for (const [language, title, subtitle] of [['en', 'English', 'English'], ['ar', 'العربية', 'Arabic']] as const) {
       const choice = button('', () => applyLanguage(language, true), 'language-option'); choice.dataset.language = language; choice.dataset.testid = `language-${language}`; choice.setAttribute('role', 'radio'); choice.setAttribute('aria-checked', String(getLanguage() === language)); choice.classList.toggle('selected', getLanguage() === language);
+      choice.tabIndex = getLanguage() === language ? 0 : -1;
+      choice.onkeydown = event => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault(); event.stopPropagation();
+        const choices = [...languages.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+        const step = ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1;
+        const index = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1 : (choices.indexOf(choice) + step + choices.length) % choices.length;
+        choices[index]?.click(); choices[index]?.focus();
+      };
       append(choice, element('span', 'language-code', language === 'ar' ? 'ع' : 'Aa'), append(element('span', 'language-choice-copy'), element('strong', '', title), element('small', '', subtitle)), svgIcon('check')); append(languages, choice);
     }
     append(dialog, languages, element('p', 'settings-save-note', 'Your preference is saved automatically.'));
