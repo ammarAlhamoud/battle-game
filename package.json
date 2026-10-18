@@ -8,7 +8,12 @@
     "build": "tsc --noEmit && vite build && node scripts/build-sw.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test": "tsc -p tsconfig.test.json && node --test .test-build/tests/*.test.js",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test:browser": "node scripts/qa-browser.mjs",
+    "test:localization": "node scripts/qa-localization.mjs",
+    "test:storage": "node scripts/qa-storage.mjs",
+    "test:campaign": "node scripts/simulate-campaign.mjs",
+    "benchmark": "node --expose-gc scripts/benchmark.mjs"
   },
   "dependencies": {
     "phaser": "3.90.0"
