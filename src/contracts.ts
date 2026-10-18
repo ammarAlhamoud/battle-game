@@ -95,21 +95,26 @@ export interface ObservedState {
   structures: Structure[]; map: string[]; mission: MissionDef; plan: AIPlan;
 }
 export type WorkerInput =
-  | { type: 'init'; missionId: string; skills: string[]; restored?: BattleState }
+  | { type: 'init'; missionId: string; skills: string[]; restored?: BattleState; startPaused?: boolean }
   | { type: 'command'; command: Command }
   | { type: 'stop' }
-  | { type: 'snapshot' };
-export type WorkerOutput = { type: 'state'; state: BattleState } | { type: 'error'; message: string };
+  | { type: 'snapshot'; requestId?: number };
+export type WorkerOutput = { type: 'state'; state: BattleState; requestId?: number } | { type: 'error'; message: string };
 export interface Selection { units: string[]; stronghold: string | null }
+/** Presentation-only targeting mode; never stored in a battle or portable save. */
+export interface TacticalTarget { kind: 'rally' | 'recon' | 'volley' | 'barrier' | 'tower' | 'attack'; ids: string[] }
 export interface BattleRenderer {
   setState(state: BattleState): void;
   setSelection(selection: Selection): void;
   focus(x: number, y: number): void;
   getViewport?(): Vec[];
+  setTargeting?(target: TacticalTarget | null): void;
+  setInputEnabled?(enabled: boolean): void;
   destroy(): void;
 }
 export interface RendererOptions {
   parent: HTMLElement; content: GameContent; mission: MissionDef;
   onSelect(selection: Selection, additive: boolean): void;
   onOrder(order: Order, append: boolean): void;
+  onTarget?(point: Vec, append?: boolean): void;
 }
