@@ -1,3 +1,26 @@
 /* Fine presentation details share the battlefield's original asset painters. */
 .graphics-quality{max-width:100%;min-height:44px;padding:9px 34px 9px 12px;color:var(--ink);background:var(--raised);border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px}
 html[dir=rtl] .graphics-quality{padding-inline:12px 34px}
+.era-detail>img{object-fit:cover;border-radius:5px;border:1px solid #9b947244}
+.results-page::before{background-image:linear-gradient(#0e171cea,#0e171cee),var(--results-art,url('/art/campaign-cover.webp'))}
+.unit-portrait,.building-portrait{display:inline-flex;flex:none;align-items:center;justify-content:center;width:58px;height:64px;position:relative;background:radial-gradient(ellipse at 50% 65%,#8fa47d27,transparent 69%);border:1px solid #bdc69b33;border-radius:8px;overflow:hidden;box-shadow:inset 0 1px #d5dab211,inset 0 -12px 15px #06151b33}
+.unit-portrait img,.building-portrait img{width:100%;height:100%;max-width:none;object-fit:contain;filter:drop-shadow(0 2px 2px #0004);pointer-events:none}
+.unit-portrait::after,.building-portrait::after{content:'';position:absolute;inset:4px;border:1px solid #bac7a411;border-radius:4px;pointer-events:none}
+.unit-portrait.role-guard,.unit-portrait.role-siege{border-color:#d8c39355;background:radial-gradient(ellipse at 50% 65%,#ac956832,transparent 70%)}
+.recruit-card{padding:7px 10px;gap:11px;min-height:77px;background:linear-gradient(120deg,#263b3b,#182b33);border-color:#4c605b;box-shadow:inset 0 1px #d7dfbe0b}
+.recruit-card .unit-portrait{width:53px;height:61px;border:0;background:radial-gradient(ellipse at 50% 70%,#9bac7c22,transparent 70%)}
+.recruit-card .unit-portrait img{transform:scale(1.12)}
+.recruit-card strong{font-size:12px;line-height:1.65}
+.recruit-card small{font-size:10px;line-height:1.65;color:#bdcbbd}
+.illustrated-heading{align-items:center;gap:15px}
+.illustrated-heading>div{flex:1;min-width:0}
+.illustrated-heading>.unit-portrait{width:61px;height:67px}
+.illustrated-heading>.building-portrait{width:86px;height:69px;border-color:#b6b29344}
+.illustrated-heading>.building-portrait img{transform:scale(1.12)}
+.reserve-unit>.unit-portrait{width:27px;height:30px;border:0;background:none;box-shadow:none}
+.reserve-unit>.unit-portrait::after{display:none}
+.unit-actions .small-button{gap:6px}
+.unit-actions .small-button>.ui-icon{width:15px;height:15px;stroke-width:1.6;color:#d0c496}
+.context-panel:has(.production-body):not(.expanded){height:318px}
+.context-panel:not(.expanded) .production-body{max-height:172px}
+@media(max-width:1100px){.recruit-card .unit-portrait{width:43px;height:55px}.recruit-card{gap:7px;padding:5px 7px;min-height:67px}.recruit-card strong{font-size:11px}.illustrated-heading{gap:10px}.illustrated-heading>.building-portrait{width:65px;height:60px}}

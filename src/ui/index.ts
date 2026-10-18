@@ -5,8 +5,11 @@ import { getGraphicsQuality, setGraphicsQuality, type GraphicsQuality } from '..
 import { unitVisible, capacity, usage, unlockedUnits, RULES } from '../sim/engine';
 import { translate, getLanguage, setLanguage, type Language } from '../i18n/index';
 import { icon as svgIcon, type IconName } from './icons';
+import { skillArt } from './skill-art';
+import { unitPortrait, buildingPortrait } from './portraits';
 import './style.css';
 import './art.css';
+import './skill-tree.css';
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
 const SHORT_ERAS = ['Origins', 'Bronze', 'Classical', 'Medieval', 'Gunpowder', 'Industrial', 'Modern', 'Space'];
@@ -245,10 +248,11 @@ export function mountUI(options: UIOptions): GameUI {
     }
     append(featureCopy, missionTeaser);
     const art = element('div', 'feature-art');
-    const image = element('img'); image.src = './art/campaign-cover.webp'; image.alt = ''; image.draggable = false; image.width=1916;image.height=821;
+    const image = element('img'); image.src = `./art/era-cover-${eraIndex+1}.webp`; image.alt = ''; image.draggable = false; image.width=768;image.height=256;
+    image.onerror=()=>{image.onerror=null;image.src=era.art;};
     append(art, image);
     append(feature, featureCopy, art); append(page, feature);
-    const eraDetail=element('div','era-detail');const eraImage=element('img');eraImage.src=era.art;eraImage.alt='';eraImage.width=120;eraImage.height=82;append(eraDetail,eraImage,append(element('div','era-detail-copy'),element('span','eyebrow','Mission intelligence'),element('strong','',selected.subtitle)),stat('Deployment budget',`${selected.resources[0]}`),stat('Base army',`${selected.capacity}`),stat('Strategic sites',`${selected.strongholds.length-2}`));append(page,eraDetail);
+    const eraDetail=element('div','era-detail');const eraImage=element('img');eraImage.src=`./art/era-cover-${eraIndex+1}.webp`;eraImage.alt='';eraImage.width=120;eraImage.height=82;append(eraDetail,eraImage,append(element('div','era-detail-copy'),element('span','eyebrow','Mission intelligence'),element('strong','',selected.subtitle)),stat('Deployment budget',`${selected.resources[0]}`),stat('Base army',`${selected.capacity}`),stat('Strategic sites',`${selected.strongholds.length-2}`));append(page,eraDetail);
     const missionsHeader = element('div', 'section-heading'); append(missionsHeader, element('h2', '', 'Choose your next battle'), element('span', '', 'Five fields. Five different ways to think.')); append(page, missionsHeader);
     const cards = element('div', 'mission-grid');
     missions.forEach(item => {
@@ -387,6 +391,7 @@ export function mountUI(options: UIOptions): GameUI {
       const owned = stronghold.owner === 0; const visible = isVisible(stronghold);
       const owner = owned ? 'YOUR CONTROL' : !visible ? 'LAST KNOWN CONTROL' : stronghold.owner === 1 ? 'ENEMY CONTROL' : 'NEUTRAL';
       const heading = panelHeading(stronghold.name, `${titleCase(stronghold.kind)} / ${owner}`, owned ? 'Hold this position to retain its strategic advantage.' : 'Move soldiers into its capture ring to establish control.');
+      heading.classList.add('illustrated-heading');heading.prepend(buildingPortrait(mission.era,stronghold.kind==='main'?0:stronghold.kind==='outpost'?1:stronghold.kind==='watchtower'?2:3));
       append(contextual, heading);
       const facts = element('div', 'stronghold-stats');
       append(facts, stat('CAPACITY BONUS', `+${stronghold.capacity}`), stat('FIRST CAPTURE', `${stronghold.reward} supplies`), stat('VISION', `${stronghold.vision} cells`));
@@ -407,6 +412,7 @@ export function mountUI(options: UIOptions): GameUI {
     if (!contextual || !state) return;
     const lead = selected[0]!; const def = definitions.get(lead.defId)!;
     const heading = panelHeading(selected.length === 1 ? def.name : `${selected.length} soldiers selected`, 'FIELD COMMAND', unitSummary(selected));
+    heading.classList.add('illustrated-heading');heading.prepend(unitPortrait(def));
     heading.querySelector('p')!.dataset.health = '';
     append(heading, button('Clear ×', () => { selection = { units: [], stronghold: null }; renderer?.setSelection(selection); renderContext(); }, 'text-button')); append(contextual, heading);
     const body = element('div', 'unit-panel-body');
@@ -414,22 +420,22 @@ export function mountUI(options: UIOptions): GameUI {
     const formationRow = element('div', 'formation-row');
     for (const formation of FORMATIONS) {
       if (!['line', 'column'].includes(formation) && !purchased('formations')) continue;
-      const item = button(titleCase(formation), () => send({ type: 'formation', side: 0, ids: [...selection.units], formation }), `small-button ${lead.formation === formation ? 'selected' : ''}`);
+      const item = withIcon(button(titleCase(formation), () => send({ type: 'formation', side: 0, ids: [...selection.units], formation }), `small-button ${lead.formation === formation ? 'selected' : ''}`),'formation');
       append(formationRow, item);
     }
     append(commands, label('FORMATION  /  F TO CYCLE', 'eyebrow'), formationRow);
     const actionRow = element('div', 'action-row');
-    const unitAbilityButton = button(lead.abilityCooldown > 0 ? `Ability ${Math.ceil(lead.abilityCooldown)}s` : 'Unit ability · Q', () => send({ type: 'unitAbility', side: 0, ids: [...selection.units] }), 'small-button', 'Activate selected soldiers: 4 supplies each, 18 second cooldown'); unitAbilityButton.dataset.unitAbility = '';
-    append(actionRow, button('Stop · S', () => send({ type: 'editOrders', side: 0, ids: [...selection.units], orders: [] }), 'small-button'), button('Defend here', () => { const unit = ownUnits()[0]; if (unit) send({ type: 'order', side: 0, ids: [...selection.units], order: { kind: 'defend', x: unit.x, y: unit.y } }); }, 'small-button'), unitAbilityButton);
+    const unitAbilityButton = withIcon(button(lead.abilityCooldown > 0 ? `Ability ${Math.ceil(lead.abilityCooldown)}s` : 'Unit ability · Q', () => send({ type: 'unitAbility', side: 0, ids: [...selection.units] }), 'small-button', 'Activate selected soldiers: 4 supplies each, 18 second cooldown'),'target'); unitAbilityButton.dataset.unitAbility = '';
+    append(actionRow, withIcon(button('Stop · S', () => send({ type: 'editOrders', side: 0, ids: [...selection.units], orders: [] }), 'small-button'),'pause'), withIcon(button('Defend here', () => { const unit = ownUnits()[0]; if (unit) send({ type: 'order', side: 0, ids: [...selection.units], order: { kind: 'defend', x: unit.x, y: unit.y } }); }, 'small-button'),'defend'), unitAbilityButton);
     append(commands, actionRow);
     const tactical = element('div', 'action-row');
     for (const ability of ['rally', 'recon', 'volley'] as const) {
       if (!purchased(ability)) continue;
       const cooldown = state.factions[0].cooldowns[ability] ?? 0;
-      const item = button(`${titleCase(ability)}${cooldown > 0 ? ` · ${Math.ceil(cooldown)}s` : ` · ${RULES.abilityCosts[ability]} supplies`}`, () => triggerAbility(ability), 'small-button'); item.dataset.ability = ability; item.disabled = cooldown > 0; append(tactical, item);
+      const item = withIcon(button(`${titleCase(ability)}${cooldown > 0 ? ` · ${Math.ceil(cooldown)}s` : ` · ${RULES.abilityCosts[ability]} supplies`}`, () => triggerAbility(ability), 'small-button'),ability); item.dataset.ability = ability; item.disabled = cooldown > 0; append(tactical, item);
     }
     const engineer = selected.some(unit => definitions.get(unit.defId)?.role === 'engineer');
-    if (engineer) for (const kind of ['barrier', 'tower'] as const) append(tactical, button(`Build ${kind}`, () => buildDialog(kind), 'small-button'));
+    if (engineer) for (const kind of ['barrier', 'tower'] as const) append(tactical, withIcon(button(`Build ${kind}`, () => buildDialog(kind), 'small-button'),kind));
     append(commands, tactical);
     const queue = element('div', 'orders-panel');
     const queueHeader = element('div', 'orders-heading'); append(queueHeader, label(`PLANNED ORDERS  /  ${lead.orders.length}`, 'eyebrow'), button('+ Add waypoint', () => editOrderDialog(null), 'text-button')); append(queue, queueHeader);
@@ -497,6 +503,7 @@ export function mountUI(options: UIOptions): GameUI {
     if (!contextual || !state || !mission) return;
     const faction = state.factions[0];
     const heading = panelHeading('Main stronghold', 'RECRUITMENT & RESERVES', `${usage(state, 0, content)} / ${capacity(state, 0, content)} army capacity · ${faction.reserves.length} / ${faction.reserveCapacity} reserve slots · ${faction.lines.length} production ${faction.lines.length === 1 ? 'line' : 'lines'}`);
+    heading.classList.add('illustrated-heading');heading.prepend(buildingPortrait(mission.era,0));
     heading.querySelector('p')!.dataset.productionCapacity = '';
     append(heading, button(productionExpanded ? 'Collapse ↓' : 'Expand ↑', () => { productionExpanded = !productionExpanded; renderContext(); }, 'text-button')); append(contextual, heading);
     const body = element('div', 'production-body'); const roster = element('div', 'recruit-roster');
@@ -504,7 +511,7 @@ export function mountUI(options: UIOptions): GameUI {
     for (const unit of units) {
       const card = button('', () => send({ type: 'recruit', side: 0, unitId: unit.id }), 'recruit-card', `${unit.description}\n${unit.hp} health · ${unit.damage} damage · ${unit.armor} armor · ${unit.range} range · ${unit.vision} vision`);
       card.dataset.recruit = unit.id; card.dataset.testid = `recruit-${unit.id}`;
-      const portrait = element('span', `unit-role-icon ${unit.role}`); portrait.append(svgIcon(unit.role));
+      const portrait = unitPortrait(unit);
       const trainingBonus = content.skills.reduce((total, skill) => total + (faction.skills.includes(skill.id) && skill.effect === 'training' && (skill.era === null || skill.era === mission!.era) ? skill.value : 0), 0);
       const trainingTime = unit.training * Math.max(.35, 1 - trainingBonus);
       const details = element('div'); append(details, element('strong', '', unit.name), element('small', '', `${unit.cost} supplies · ${unit.capacity} cap · ${Math.round(trainingTime * 10) / 10}s`));
@@ -535,7 +542,7 @@ export function mountUI(options: UIOptions): GameUI {
       const down = button('↓', () => reorderReserve(index, 1), 'queue-icon', 'Lower deployment priority'); down.disabled = index === faction.reserves.length - 1;
       const deploy = button('Deploy', () => send({ type: 'deploy', side: 0, reserveId: unit.id }), 'text-button'); deploy.disabled = usage(state!, 0, content) + (def?.capacity ?? 1) > capacity(state!, 0, content);
       deploy.dataset.deploy = unit.id;
-      append(row, label(`${index + 1}`, 'reserve-priority'), label(def?.name ?? unit.unitId, 'reserve-name'), up, down, deploy); append(reserve, row);
+      append(row, label(`${index + 1}`, 'reserve-priority'), def?unitPortrait(def):null, label(def?.name ?? unit.unitId, 'reserve-name'), up, down, deploy); append(reserve, row);
     }); append(factory, reserve); append(body, roster, factory); append(contextual, body);
     const activeBonuses = faction.skills.map(id => content.skills.find(skill => skill.id === id)).filter((skill): skill is SkillDef => !!skill && ['training', 'capacity', 'reserve', 'lines'].includes(skill.effect));
     append(contextual, element('div', 'production-note', `CANCEL: 100% before training · 50% after training begins. ${activeBonuses.length ? `ACTIVE: ${activeBonuses.map(skill => skill.name).join(' · ')}` : 'Select units in the field to return to tactical orders.'}`));
@@ -593,7 +600,7 @@ export function mountUI(options: UIOptions): GameUI {
   }
 
   function openSkills() {
-    const dialog = openModal('The civilization tree', 'skills-modal'); let skillEra = mission?.era ?? eraIndex; let zoom = 1;
+    const dialog = openModal('The civilization tree', 'skills-modal'); let skillEra = mission?.era ?? eraIndex; let zoom = .88;
     const activeAttempt = screen === 'battle' || !!savedBattle && !savedBattle.ended;
     const intro = element('div', 'skill-intro');
     append(intro, element('p', '', activeAttempt ? 'Inspect your civilization at any time. Finish or concede the active battle before purchasing knowledge or redistributing skills.' : 'Build a civilization, one decision at a time. Permanent knowledge crosses the ages; era knowledge shapes its army.'), stat('AVAILABLE KNOWLEDGE', `${campaign.points} SP`)); append(dialog, intro);
@@ -611,28 +618,33 @@ export function mountUI(options: UIOptions): GameUI {
     function applyZoom(value: number) { zoom = value; tree.style.transform = `scale(${zoom})`; space.style.width = `${tree.offsetWidth * zoom}px`; space.style.height = `${tree.offsetHeight * zoom}px`; }
     function drawTree() {
       tree.replaceChildren(); const skills = content.skills.filter(skill => skill.era === null || skill.era === skillEra);
-      const nodeX = (skill: SkillDef) => skill.x * 1.45;
+      const nodeX = (skill: SkillDef) => skill.x * 1.65;
       const maxX = Math.max(...skills.map(nodeX), 600); const maxY = Math.max(...skills.map(skill => skill.y), 420);
-      const width = maxX + 260, height = maxY + 150; tree.style.width = `${width}px`; tree.style.height = `${height}px`;
+      const width = maxX + 280, height = maxY + 175; tree.style.width = `${width}px`; tree.style.height = `${height}px`;
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('width', String(width)); svg.setAttribute('height', String(height)); svg.classList.add('skill-lines');
       for (const skill of skills) for (const prerequisite of skill.prerequisites) {
         const from = skills.find(item => item.id === prerequisite); if (!from) continue;
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); const ax = nodeX(from) + 110, ay = from.y + 55, bx = nodeX(skill) + 110, by = skill.y + 55;
-        path.setAttribute('d', `M ${ax} ${ay} C ${ax} ${(ay + by) / 2} ${bx} ${(ay + by) / 2} ${bx} ${by}`); path.setAttribute('class', campaign.skills.includes(from.id) ? 'purchased' : ''); svg.append(path);
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); const ax = nodeX(from) + 120, ay = from.y + 66, bx = nodeX(skill) + 120, by = skill.y + 66;
+        path.setAttribute('d', `M ${ax} ${ay} C ${ax} ${(ay + by) / 2} ${bx} ${(ay + by) / 2} ${bx} ${by}`); path.setAttribute('class', campaign.skills.includes(skill.id) ? 'purchased' : campaign.skills.includes(from.id) ? 'available' : ''); svg.append(path);
       } tree.append(svg);
+      const permanentLabel=label('Civilization','skill-branch-label');permanentLabel.style.top='15px';
+      const eraLabel=label(content.eras[skillEra]!.name,'skill-branch-label');eraLabel.style.top='805px';append(tree,permanentLabel,eraLabel);
       for (const skill of skills) {
         const bought = campaign.skills.includes(skill.id); const prerequisites = skill.prerequisites.every(id => campaign.skills.includes(id)); const eraUnlocked = skill.era === null || content.missions.some(item => item.era === skill.era && missionUnlocked(item)); const available = !bought && prerequisites && eraUnlocked && campaign.points >= skill.cost;
         const node = button('', () => showSkill(skill, drawTree), `skill-node ${bought ? 'purchased' : available ? 'available' : 'locked'}`);
+        node.dataset.skill=skill.id;node.setAttribute('aria-expanded','false');
         node.style.left = `${nodeX(skill)}px`; node.style.top = `${skill.y}px`;
-        append(node, label(skill.era === null ? 'CIVILIZATION' : `AGE ${ROMAN[skill.era]}`, 'eyebrow'), element('strong', '', skill.name), element('span', 'skill-node-bottom', bought ? '✓ LEARNED' : `${skill.cost} SP${!prerequisites ? ' · PREREQUISITE REQUIRED' : ''}`)); append(tree, node);
+        append(node, skillArt(skill.effect), label(skill.era === null ? 'CIVILIZATION' : `AGE ${ROMAN[skill.era]}`, 'eyebrow'), element('strong', '', skill.name), element('span', 'skill-node-bottom', bought ? '✓ LEARNED' : `${skill.cost} SP${!prerequisites ? ' · PREREQUISITE REQUIRED' : ''}`)); append(tree, node);
       }
       const points = intro.querySelector('strong'); if (points) setText(points, `${campaign.points} SP`); applyZoom(zoom);
     }
     function showSkill(skill: SkillDef, redraw: () => void) {
       dialog.querySelector('.skill-detail')?.remove();
+      for(const node of dialog.querySelectorAll<HTMLElement>('.skill-node'))node.setAttribute('aria-expanded',String(node.dataset.skill===skill.id));
       const detail = element('aside', 'skill-detail'); const bought = campaign.skills.includes(skill.id); const missing = skill.prerequisites.filter(id => !campaign.skills.includes(id));
+      append(detail,skillArt(skill.effect));
       const eraUnlocked = skill.era === null || content.missions.some(item => item.era === skill.era && missionUnlocked(item));
-      const header = element('div', 'skill-detail-header'); append(header, element('h3', '', skill.name), button('×', () => detail.remove(), 'icon-button', 'Close skill details')); append(detail, header, element('p', '', skill.description));
+      const header = element('div', 'skill-detail-header'); append(header, element('h3', '', skill.name), button('×', () => {detail.remove();for(const node of dialog.querySelectorAll('.skill-node'))node.setAttribute('aria-expanded','false');}, 'icon-button', 'Close skill details')); append(detail, header, element('p', '', skill.description));
       if (missing.length) append(detail, element('p', 'requirements', `REQUIRES: ${missing.map(id => content.skills.find(item => item.id === id)?.name ?? id).join(', ')}`));
       if (!eraUnlocked) append(detail, element('p', 'requirements', 'REACH THIS ERA TO PURCHASE ITS KNOWLEDGE.'));
       const buy = button(bought ? '✓ Knowledge acquired' : activeAttempt ? 'Finish the active battle to purchase' : `Learn · ${skill.cost} SP`, () => { const error = options.onBuySkill(skill.id); if (error) notify(error); else { redraw(); showSkill(skill, redraw); } }, 'primary');
@@ -642,7 +654,7 @@ export function mountUI(options: UIOptions): GameUI {
   }
   function showResults(results: ResultsData) {
     renderer?.destroy(); renderer = null; state = null; screen = 'results'; closeModal(); root.replaceChildren(); root.classList.remove('in-battle');
-    const played = content.missions.find(item => item.id === results.missionId)!; const page = element('main', 'results-page'); append(page, brand());
+    const played = content.missions.find(item => item.id === results.missionId)!; const page = element('main', 'results-page'); page.style.setProperty('--results-art',`url('./art/era-cover-${played.era+1}.webp')`);append(page, brand());
     const result = element('section', 'results-card'); append(result, element('div', `result-seal ${results.victory ? '' : 'defeat'}`, results.victory ? '✦' : '↶'), element('p', 'eyebrow', `${content.eras[played.era]!.name} / ${played.name}`), element('h1', '', results.victory ? 'Ground gained.' : 'A lesson from the field.'), element('p', 'result-description', results.victory ? 'The field is yours. Carry this knowledge into the next battle.' : 'Your campaign endures. Reconsider your army, your approach, and the ground you choose.'));
     const stats = element('div', 'results-stats'); append(stats, stat('PERFORMANCE SCORE', number(results.score)), stat('KNOWLEDGE EARNED', `+${results.reward} SP`), stat('PERSONAL BEST', number(campaign.records[played.id]?.bestScore ?? results.score))); append(result, stats);
     const actions = element('div', 'result-actions'); const next = nextMission();
