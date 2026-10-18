@@ -211,7 +211,12 @@ export function applyCommand(state: BattleState, command: Command, content: Game
       }
       else globalAbility(state, side, command.ability, command, content); break;
     }
-    case 'unitAbility': selected.forEach(u => { if (state.paused) u.orders.unshift({ kind: 'ability', x: u.x, y: u.y }); else unitAbility(state, u, content); }); break;
+    case 'unitAbility': selected.forEach(u => {
+      if (state.paused) {
+        // Repeated activation updates one planned cast without filling the order queue.
+        u.orders = [{ kind: 'ability' as const, x: u.x, y: u.y }, ...u.orders.filter(order => order.kind !== 'ability')].slice(0, 32);
+      } else unitAbility(state, u, content);
+    }); break;
     case 'build': {
       if (!validPoint(missionOf(state, content), command)) break;
       const engineer = selected.find(u => definition(content, u.defId).role === 'engineer');

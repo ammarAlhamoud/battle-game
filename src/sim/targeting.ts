@@ -25,7 +25,7 @@ export function checkTarget(state: BattleState, content: GameContent, target: Ta
   }
   if (faction.resources < cost) return result('Not enough supplies.');
   const width = mission.map[0]!.length;
-  const visible = (p: Vec) => !!state.fog[0].visible[Math.round(p.y) * width + Math.round(p.x)];
+  const visible = (p: Vec) => { const x = Math.round(p.x), y = Math.round(p.y); return x >= 0 && y >= 0 && x < width && y < mission.map.length && !!state.fog[0].visible[y * width + x]; };
   if ((ability && ability !== 'recon' || building) && !visible(point)) return result('Choose a target within your current vision.');
   if (building) {
     const engineers = state.units.filter(u => u.owner === 0 && u.hp > 0 && target.ids.includes(u.id) && content.eras[mission.era]!.units.some(d => d.id === u.defId && d.role === 'engineer'));

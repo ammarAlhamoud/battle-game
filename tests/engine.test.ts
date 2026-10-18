@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import type { BattleState, GameContent, MissionDef, Role, Side, SkillDef, Unit, UnitDef } from '../src/contracts.js';
 import { applyCommand, capacity, createBattle, RULES, stepBattle, unitVisible, unlockedUnits, usage } from '../src/sim/engine.js';
+import { createCampaign, validateSave } from '../src/persistence/index.js';
 
 const makeDef = (role: Role, extra: Partial<UnitDef> = {}): UnitDef => ({ id: `e1-${role}`, era: 0, name: role, role, description: role,
   hp: 100, damage: 12, armor: 2, attackTime: 1, range: 1.4, speed: 2, cost: 20, capacity: 1,
@@ -230,6 +231,33 @@ test('retargeting a paused global ability replaces its old plan and charges once
     assert.equal(battle.events.filter(event => event.kind === 'ability' && event.text === 'recon').length, 1);
   }
   assert.deepEqual(restored, state, 'save restoration retains the single retargeted cast');
+});
+
+test('repeated paused unit abilities remain one bounded save-safe cast and preserve planned waypoints', () => {
+  const { state, content } = fixture(); const soldier = own(state), faction = state.factions[0];
+  soldier.defId = 'e1-scout';
+  const waypoints: Unit['orders'] = [{ kind: 'move', x: 8, y: 12 }, { kind: 'defend', x: 8, y: 12 }];
+  applyCommand(state, { type: 'editOrders', side: 0, ids: [soldier.id], orders: waypoints }, content);
+  applyCommand(state, { type: 'pause', value: true }, content);
+  for (let i = 0; i < 40; i++) applyCommand(state, { type: 'unitAbility', side: 0, ids: [soldier.id] }, content);
+  assert.equal(soldier.orders.length, 3); assert.equal(soldier.orders.filter(order => order.kind === 'ability').length, 1);
+  assert.deepEqual(soldier.orders.slice(1), waypoints);
+  const funds = faction.resources; assert.equal(faction.spent, 0);
+  validateSave({ version: 1, savedAt: 1, campaign: createCampaign(), battle: state }, content);
+  applyCommand(state, { type: 'pause', value: false }, content); stepBattle(state, content);
+  assert.equal(faction.resources, funds - 4); assert.equal(faction.spent, 4);
+  assert.equal(soldier.abilityCooldown, 18); assert.deepEqual(soldier.orders, waypoints);
+  ticks(state, content, 5);
+  assert.equal(faction.resources, funds - 4, 'repeated planning cannot create later duplicate charges');
+  validateSave({ version: 1, savedAt: 2, campaign: createCampaign(), battle: state }, content);
+
+  const full = Array.from({ length: 32 }, (_, index): Unit['orders'][number] => ({ kind: 'move', x: 8 + index % 3, y: 12 }));
+  applyCommand(state, { type: 'pause', value: true }, content);
+  applyCommand(state, { type: 'editOrders', side: 0, ids: [soldier.id], orders: full }, content);
+  for (let i = 0; i < 300; i++) applyCommand(state, { type: 'unitAbility', side: 0, ids: [soldier.id] }, content);
+  assert.equal(soldier.orders.length, 32); assert.equal(soldier.orders.filter(order => order.kind === 'ability').length, 1);
+  assert.deepEqual(soldier.orders.slice(1), full.slice(0, 31), 'remaining waypoints retain their original sequence within the queue limit');
+  validateSave({ version: 1, savedAt: 3, campaign: createCampaign(), battle: state }, content);
 });
 
 test('terrain cover, role counters, armor formations and damage skills produce different combat outcomes', () => {

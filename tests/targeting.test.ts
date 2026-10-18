@@ -20,6 +20,8 @@ test('target preview rejects out-of-bounds and fogged spells but recon can revea
   assert.equal(checkTarget(state, content, { kind: 'recon', ids: [] }, point).valid, true);
   assert.equal(checkTarget(state, content, { kind: 'recon', ids: [] }, { x: -1, y: 1 }).valid, false);
   assert.equal(checkTarget(state, content, { kind: 'recon', ids: [] }, { x: NaN, y: 1 }).valid, false);
+  state.fog[0].visible.fill(true);
+  assert.equal(checkTarget(state, content, { kind: 'rally', ids: [] }, { x: mission.map[0]!.length - .1, y: 1 }).valid, false);
 });
 test('construction preview validates engineers, terrain, clear space and actual discounted cost', () => {
   const { mission, state, engineer } = fixture(); state.fog[0].visible.fill(true);
