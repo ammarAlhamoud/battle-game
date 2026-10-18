@@ -394,6 +394,10 @@ function captures(state: BattleState, content: GameContent, dt: number): void {
     if (stronghold.owner === side) { stronghold.progress = Math.max(0, stronghold.progress - rate * 1.2); if (!stronghold.progress) stronghold.capturing = null; continue; }
     if (stronghold.capturing !== null && stronghold.capturing !== side && stronghold.progress > 0) { stronghold.progress = Math.max(0, stronghold.progress - rate); if (!stronghold.progress) stronghold.capturing = null; continue; }
     stronghold.capturing = side; stronghold.progress = Math.min(100, stronghold.progress + rate);
+    if (stronghold.owner !== null && stronghold.owner !== side && stronghold.capturing === null && stronghold.progress === 0) {
+      const recent = state.events.some(e => e.kind === 'alert' && e.owner === stronghold.owner && distance(e, stronghold) < .1 && state.tick - e.tick < 100);
+      if (!recent) emit(state, { kind: 'alert', owner: stronghold.owner, x: stronghold.x, y: stronghold.y, text: `${stronghold.name} is under occupation` });
+    }
     if (stronghold.progress < 100) continue;
     const wasMain = stronghold.kind === 'main'; stronghold.owner = side; stronghold.progress = 0; stronghold.capturing = null;
     const f = state.factions[side];
