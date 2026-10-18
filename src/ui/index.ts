@@ -2,6 +2,8 @@ import type { BattleRenderer, BattleState, Campaign, Command, Formation, Mission
 import type { GameUI, ResultsData, UIOptions } from '../ui-contract';
 import { createRenderer } from '../render/index';
 import { unitVisible, capacity, usage, unlockedUnits, RULES } from '../sim/engine';
+import { translate, getLanguage, setLanguage, type Language } from '../i18n/index';
+import { icon as svgIcon, type IconName } from './icons';
 import './style.css';
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
@@ -15,21 +17,49 @@ const TUTORIALS = [
   { name: 'Know your opponent', text: 'Scouts reveal the map and detect stealth. The dim land is memory, not live intelligence. Capture the enemy main stronghold to win.', key: '05 / SCOUT & CONQUER' },
 ];
 
+const textSources = new WeakMap<Text, string>();
+const attributeSources = new WeakMap<Element, Map<string, string>>();
+function displayTranslation(source:string):string { const value=translate(source);return getLanguage()==='ar'?value.replace(/\d[\d,]*(?:\.\d+)?\s*\/\s*\d[\d,]*(?:\.\d+)?/g,match=>`\u2066${match}\u2069`):value; }
+function localizedText(source: string): Text { const text = document.createTextNode(displayTranslation(source)); textSources.set(text, source); return text; }
+function setText(el: Element, source: string): void {
+  const target = el.querySelector(':scope > .button-label') ?? el;
+  const first = target.firstChild;
+  if (target.childNodes.length === 1 && first instanceof Text) { textSources.set(first, source); const value = displayTranslation(source); if (first.data !== value) first.data = value; }
+  else target.replaceChildren(localizedText(source));
+}
+function localAttribute(el: Element, name: string, source: string): void { let values = attributeSources.get(el); if (!values) { values = new Map(); attributeSources.set(el, values); } values.set(name, source); el.setAttribute(name, translate(source)); }
+function localizeTree(parent: Node): void {
+  const walker = document.createTreeWalker(parent, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) { const text = node as Text; const source = textSources.get(text); if (source !== undefined) text.data = displayTranslation(source); }
+  if (parent instanceof Element) for (const el of [parent, ...parent.querySelectorAll('*')]) { const values = attributeSources.get(el); if (values) for (const [name, source] of values) el.setAttribute(name, translate(source)); }
+}
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
-  const el = document.createElement(tag); el.className = className; if (text) el.textContent = text; return el;
+  const el = document.createElement(tag); el.className = className; if (text) el.append(localizedText(text)); return el;
 }
-function append(parent: HTMLElement, ...children: (Node | string | null)[]) { for (const child of children) if (child !== null) parent.append(child); return parent; }
+function append(parent: HTMLElement, ...children: (Node | string | null)[]) { for (const child of children) if (child !== null) parent.append(typeof child === 'string' ? localizedText(child) : child); return parent; }
 function button(text: string, onClick: () => void, className = '', title = '') {
-  const el = element('button', className, text); el.type = 'button'; el.onclick = onClick; if (title) el.title = title; return el;
+  const el = element('button', className); el.append(element('span', 'button-label', text)); el.type = 'button'; el.onclick = onClick; if (title) { localAttribute(el, 'title', title); if (!text) localAttribute(el, 'aria-label', title); } return el;
 }
+function withIcon(button: HTMLButtonElement, name: IconName): HTMLButtonElement { button.prepend(svgIcon(name)); return button; }
 function label(text: string, className = '') { return element('span', className, text); }
 function number(value: number) { return Math.max(0, Math.floor(value)).toLocaleString('en'); }
 function clock(value: number) { return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(Math.floor(value % 60)).padStart(2, '0')}`; }
 function titleCase(text: string) { return text.charAt(0).toUpperCase() + text.slice(1); }
+function mapPreview(mission: MissionDef): SVGSVGElement {
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'); const width=mission.map[0]!.length,height=mission.map.length;
+  svg.setAttribute('viewBox',`0 0 ${(width+height)*6+24} ${(width+height)*3+20}`);svg.classList.add('mission-map');svg.setAttribute('aria-hidden','true');
+  const colors:Record<string,string>={'.':'#60766b',f:'#304f45','^':'#88916a','~':'#315d67','=':'#b09b70','#':'#263d41',g:'#ad996d',c:'#75867b'};
+  const groups=new Map<string,string[]>();
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){const key=mission.map[y]![x]!,px=(height+x-y)*6+12,py=(x+y)*3+8;const color=colors[key]??colors['.']!;const paths=groups.get(color)??[];paths.push(`M${px} ${py}l6 3-6 3-6-3Z`);groups.set(color,paths);}
+  for(const [color,paths] of groups){const p=document.createElementNS(svg.namespaceURI,'path');p.setAttribute('d',paths.join(''));p.setAttribute('fill',color);svg.append(p);}
+  for(const s of mission.strongholds){const x=(height+s.x-s.y)*6+12,y=(s.x+s.y)*3+11;const marker=document.createElementNS(svg.namespaceURI,'path');marker.setAttribute('d',`M${x} ${y-6}l4 4-4 4-4-4Z`);marker.setAttribute('fill',s.owner===0?'#86e0bd':s.owner===1?'#edac95':'#f1d297');marker.setAttribute('stroke','#17282c');marker.setAttribute('stroke-width','1.5');svg.append(marker);}
+  return svg;
+}
 
 /** DOM-only presentation. The worker remains the single source of battle state. */
 export function mountUI(options: UIOptions): GameUI {
   const { parent, content } = options;
+  setLanguage(options.campaign.language ?? 'en');
   let campaign = options.campaign;
   let savedBattle = options.savedBattle;
   let state: BattleState | null = null;
@@ -49,12 +79,21 @@ export function mountUI(options: UIOptions): GameUI {
   let battleRoot: HTMLElement | null = null;
   let modal: HTMLElement | null = null;
   let modalClose: (() => void) | null = null;
+  let modalTrigger: HTMLElement | null = null;
   let destroyed = false;
   let campaignDirty = false;
   const groups = new Map<number, string[]>();
   const root = element('div', 'eightfold-app');
   const toasts = element('div', 'toast-stack'); toasts.setAttribute('aria-live', 'polite');
   append(parent, root, toasts);
+  function applyLanguage(language: Language, save = false): void {
+    setLanguage(language); document.documentElement.lang = language; document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+    document.title = language === 'ar' ? 'EIGHTFOLD — فن القيادة' : 'Eightfold — The Art of Command';
+    localizeTree(root); localizeTree(toasts);
+    for (const control of root.querySelectorAll<HTMLElement>('[data-language]')) { const checked = control.dataset.language === language; control.classList.toggle('selected', checked); control.setAttribute('aria-checked', String(checked)); }
+    if (save) { campaign.language = language; options.onLanguageChange(language); }
+  }
+  applyLanguage(getLanguage());
   const notify = (message: string) => {
     if (destroyed) return;
     const toast = element('div', 'toast', message); append(toasts, toast);
@@ -83,16 +122,35 @@ export function mountUI(options: UIOptions): GameUI {
     if (!compact) append(wrap.lastElementChild as HTMLElement, element('small', '', 'THE ART OF COMMAND'));
     return wrap;
   }
-  function closeModal() { if (modalClose) modalClose(); modal?.remove(); modal = null; modalClose = null; if (campaignDirty && screen === 'campaign') { campaignDirty = false; renderCampaign(); } }
+  function closeModal() {
+    const trigger=modalTrigger;const triggerId=trigger?.dataset.testid;
+    if(modalClose)modalClose();modal?.remove();modal=null;modalClose=null;modalTrigger=null;
+    if(campaignDirty&&screen==='campaign'){campaignDirty=false;renderCampaign();}
+    if(trigger?.isConnected)trigger.focus();else if(triggerId)root.querySelector<HTMLElement>(`[data-testid="${triggerId}"]`)?.focus();
+  }
   function openModal(name: string, className = '') {
     closeModal();
+    modalTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     modal = element('div', 'modal-backdrop');
-    const dialog = element('section', `modal ${className}`); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', name);
-    const header = element('header', 'modal-header'); append(header, element('h2', '', name), button('×', closeModal, 'icon-button', 'Close (Escape)'));
+    const dialog = element('section', `modal ${className}`); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); localAttribute(dialog, 'aria-label', name);
+    const header = element('header', 'modal-header'); append(header, element('h2', '', name), withIcon(button('', closeModal, 'icon-button', 'Close (Escape)'), 'close'));
     append(dialog, header); append(modal, dialog); append(root, modal);
     modal.addEventListener('pointerdown', event => { if (event.target === modal) closeModal(); });
     window.setTimeout(() => dialog.querySelector<HTMLElement>('button')?.focus(), 0);
     return dialog;
+  }
+  function settings() {
+    const dialog = openModal('Settings', 'settings-modal');
+    const introduction = element('div', 'settings-introduction'); append(introduction, svgIcon('globe'), element('div', '', 'Choose your language')); append(dialog, introduction);
+    append(dialog, element('p', 'modal-copy', 'Language changes immediately. Your battle is not restarted.'));
+    const languages = element('div', 'language-options'); languages.setAttribute('role', 'radiogroup'); localAttribute(languages, 'aria-label', 'Interface language');
+    for (const [language, title, subtitle] of [['en', 'English', 'English'], ['ar', 'العربية', 'Arabic']] as const) {
+      const choice = button('', () => applyLanguage(language, true), 'language-option'); choice.dataset.language = language; choice.dataset.testid = `language-${language}`; choice.setAttribute('role', 'radio'); choice.setAttribute('aria-checked', String(getLanguage() === language)); choice.classList.toggle('selected', getLanguage() === language);
+      append(choice, element('span', 'language-code', language === 'ar' ? 'ع' : 'Aa'), append(element('span', 'language-choice-copy'), element('strong', '', title), element('small', '', subtitle)), svgIcon('check')); append(languages, choice);
+    }
+    append(dialog, languages, element('p', 'settings-save-note', 'Your preference is saved automatically.'));
+    const display = element('div', 'settings-row'); append(display, element('span', '', 'Fullscreen'), withIcon(button('Fullscreen ⛶', () => run(async () => { if (document.fullscreenElement) await document.exitFullscreen(); else await parent.requestFullscreen(); }), 'secondary'), 'expand'));
+    append(dialog, display, button('Done', closeModal, 'primary'));
   }
   function confirmLeave() {
     const dialog = openModal('Return to the campaign');
@@ -109,7 +167,7 @@ export function mountUI(options: UIOptions): GameUI {
     const dialog = openModal('A field guide to command', 'guide-modal');
     append(dialog, element('p', 'modal-copy', 'Capture the enemy main stronghold. Earn supplies from defeated units and first captures; there is no passive income. Your opponent follows the same rules.'));
     const grid = element('div', 'guide-grid');
-    const bindings = [['Left-click / drag', 'Select a soldier, stronghold or group'], ['Right-click', 'Move, attack, capture or defend'], ['Shift + right-click', 'Append an order to your plan'], ['Space', 'Pause both armies; keep planning'], ['W A S D / arrows', 'Pan the map'], ['Wheel / middle drag', 'Zoom / pan the map'], ['Ctrl + 1–9', 'Assign selected soldiers to a group'], ['Shift + 1–9', 'Add soldiers to a control group'], ['1–9', 'Recall a control group'], ['F / S / H', 'Cycle formation / stop / focus home'], ['Q / R / T / V', 'Unit ability / rally / recon / volley'], ['Escape', 'Close a panel or clear selection']];
+    const bindings = [['Left-click / drag', 'Select a soldier, stronghold or group'], ['Right-click', 'Move, attack, capture or defend'], ['Shift + right-click', 'Append an order to your plan'], ['Spacebar', 'Pause both armies; keep planning'], ['W A S D / arrows', 'Pan the map'], ['Wheel / middle drag', 'Zoom / pan the map'], ['Ctrl + 1–9', 'Assign selected soldiers to a group'], ['Shift + 1–9', 'Add soldiers to a control group'], ['1–9', 'Recall a control group'], ['F / S / H', 'Cycle formation / stop / focus home'], ['Q / R / T / V', 'Unit ability / rally / recon / volley'], ['Escape', 'Close a panel or clear selection']];
     for (const [key, action] of bindings) append(grid, element('kbd', '', key), element('span', '', action));
     append(dialog, grid, button('Replay field tutorial', () => { closeModal(); tutorialStep = 0; tutorialOpen = true; campaign.tutorial = true; if (screen === 'battle') renderTutorial(); else notify('The field tutorial will begin when you enter a battle.'); }, 'secondary'));
   }
@@ -117,68 +175,85 @@ export function mountUI(options: UIOptions): GameUI {
     const bar = element('div', 'utility-bar');
     const fileInput = element('input'); fileInput.type = 'file'; fileInput.accept = '.json,application/json'; fileInput.hidden = true;
     fileInput.onchange = () => { const file = fileInput.files?.[0]; if (file) run(() => options.onImport(file), 'Save imported. Your campaign is ready.'); fileInput.value = ''; };
-    append(bar, button('Field guide ↗', help), button('Export save', () => run(options.onExport)), button('Import save', () => fileInput.click()), fileInput);
-    const offlineButton = button('↓ Download all eras', () => {
+    append(bar, withIcon(button('Export save', () => run(options.onExport)), 'upload'), withIcon(button('Import save', () => fileInput.click()), 'download'), fileInput);
+    const offlineButton = withIcon(button('↓ Download all eras', () => {
       offlineButton.disabled = true;
-      run(async () => { try { await options.onOffline(value => { offlineButton.textContent = `Downloading ${Math.round(value)}%`; }); offlineButton.textContent = '✓ All eras available offline'; } catch (error) { offlineButton.textContent = '↓ Retry offline download'; throw error; } finally { offlineButton.disabled = false; } });
-    }); offlineButton.dataset.testid = 'download-offline'; append(bar, offlineButton);
-    append(bar, button('Fullscreen ⛶', () => run(async () => { if (document.fullscreenElement) await document.exitFullscreen(); else await parent.requestFullscreen(); })));
+      run(async () => { try { await options.onOffline(value => { setText(offlineButton, `Downloading ${Math.round(value)}%`); }); setText(offlineButton, '✓ All eras available offline'); } catch (error) { setText(offlineButton, '↓ Retry offline download'); throw error; } finally { offlineButton.disabled = false; } });
+    }), 'download'); offlineButton.dataset.testid = 'download-offline'; append(bar, offlineButton);
     return bar;
   }
   function renderCampaign() {
     renderer?.destroy(); renderer = null; state = null; mission = null; screen = 'campaign'; closeModal();
     root.replaceChildren(); root.classList.remove('in-battle');
+    const shell = element('div', 'campaign-shell');
+    const sidebar = element('aside', 'command-sidebar'); append(sidebar, brand());
+    append(sidebar, element('p', 'sidebar-section-label', 'Command center'));
+    const navigation = element('nav', 'command-navigation'); localAttribute(navigation, 'aria-label', 'Command center');
+    const navCampaign = withIcon(button('Campaign', renderCampaign, 'nav-item active'), 'campaign'); navCampaign.setAttribute('aria-current','page');
+    const navSkills = withIcon(button('Civilization', openSkills, 'nav-item'), 'tree');
+    const navSettings=withIcon(button('Settings', settings, 'nav-item'), 'settings'); navSettings.dataset.testid='settings';
+    append(navigation, navCampaign, navSkills, withIcon(button('Field guide ↗',help,'nav-item'),'guide'),navSettings); append(sidebar,navigation);
+    const wins=Object.values(campaign.records).filter(record=>record.victory).length;
+    const progress=element('div','sidebar-progress'); append(progress,element('p','eyebrow','Campaign progress'),element('strong','',`${wins} / 40`));
+    const bar=element('progress');bar.max=40;bar.value=wins;localAttribute(bar,'aria-label','Campaign progress');append(progress,bar,element('p','','FORTY BATTLES. EIGHT ERAS. YOUR LEGACY.'));append(sidebar,progress);
+    const commander=element('div','local-commander');append(commander,append(element('div','commander-emblem'),svgIcon('guard')),append(element('div'),element('strong','','Local commander'),element('small','','Saved on this device')));append(sidebar,commander);
     const page = element('main', 'campaign-page');
     const head = element('header', 'campaign-header');
+    const heading=element('div','campaign-heading');append(heading,element('p','eyebrow','Single-player campaign'),element('h2','','Campaign overview'));
     const headerActions = element('div', 'header-actions');
-    const skillsButton = button(`Civilization tree  ·  ${campaign.points} SP`, openSkills, 'secondary'); skillsButton.dataset.testid = 'skills';
-    append(headerActions, element('span', 'campaign-completion', `${Object.values(campaign.records).filter(record => record.victory).length} / 40 BATTLES WON`), skillsButton);
-    append(head, brand(), headerActions); append(page, head);
-    const tabs = element('nav', 'era-tabs'); tabs.setAttribute('aria-label', 'Civilization eras');
+    const skillsButton = withIcon(button(`Civilization tree  ·  ${campaign.points} SP`, openSkills, 'knowledge-button'),'tree'); skillsButton.dataset.testid = 'skills';
+    const languageControl=withIcon(button('Language',settings,'secondary language-shortcut'),'globe');languageControl.dataset.testid='language-settings';
+    append(headerActions, skillsButton,languageControl);append(head,heading,headerActions);append(page,head);
+    const eraHeading=element('div','era-heading');append(eraHeading,element('p','eyebrow','AGES OF CIVILIZATION'),element('span','',`${wins} / 40 BATTLES WON`));append(page,eraHeading);
+    const tabs = element('nav', 'era-tabs'); localAttribute(tabs, 'aria-label', 'Civilization eras');
     content.eras.forEach((era, index) => {
       const unlocked = content.missions.some(item => item.era === index && missionUnlocked(item));
       const tab = button('', () => { eraIndex = index; campaign.selectedEra = index; renderCampaign(); run(options.onSave); }, `era-tab ${eraIndex === index ? 'active' : ''} ${unlocked ? '' : 'era-locked'}`, era.name);
       tab.setAttribute('aria-current', eraIndex === index ? 'page' : 'false');
-      append(tab, label(ROMAN[index]!, 'era-roman'), label(SHORT_ERAS[index]!, 'era-short'), label(unlocked ? '' : '⌑', 'era-lock')); append(tabs, tab);
+      append(tab, label(ROMAN[index]!, 'era-roman'), label(SHORT_ERAS[index]!, 'era-short'));if(!unlocked)tab.append(svgIcon('lock','era-lock')); append(tabs, tab);
     }); append(page, tabs);
     const era = content.eras[eraIndex]!;
     const missions = content.missions.filter(item => item.era === eraIndex);
     const selected = missions.find(item => missionUnlocked(item) && !campaign.records[item.id]?.victory) ?? missions.find(item => missionUnlocked(item)) ?? missions[0]!;
     const feature = element('section', 'era-feature'); feature.style.setProperty('--era-accent', era.accent);
     const featureCopy = element('div', 'feature-copy');
-    append(featureCopy, element('p', 'eyebrow', `THE ${ROMAN[eraIndex]} AGE  /  ${era.years}`), element('h1', '', era.name), element('p', 'era-subtitle', era.subtitle), element('p', 'era-description', era.description));
+    append(featureCopy, element('p', 'eyebrow hero-eyebrow', `THE ${ROMAN[eraIndex]} AGE  /  ${era.years}`), element('h1', '', era.name), element('p', 'era-subtitle', era.subtitle), element('p', 'era-description', era.description));
     const missionTeaser = element('div', 'next-mission');
     append(missionTeaser, label(missionUnlocked(selected) ? (campaign.records[selected.id]?.victory ? 'RETURN TO THE FIELD' : 'YOUR NEXT COMMAND') : 'THE NEXT CHAPTER', 'eyebrow'), element('h3', '', selected.name));
     const start = button(missionUnlocked(selected) ? `${campaign.records[selected.id]?.victory ? 'Replay' : 'Begin'} battle  →` : 'Complete the previous age to unlock', () => options.onStart(selected.id, false), 'primary'); start.disabled = !missionUnlocked(selected); start.dataset.testid = 'start-battle';
-    append(missionTeaser, start);
+    start.append(svgIcon('arrow','directional'));append(missionTeaser, start);
     if (savedBattle && !savedBattle.ended) {
       const resumeMission = content.missions.find(item => item.id === savedBattle?.missionId);
       if (resumeMission) { const resume = button(`↶ Resume ${resumeMission.name} · ${clock(savedBattle.time)}`, () => options.onStart(resumeMission.id, true), 'resume-link'); resume.dataset.testid = 'resume-battle'; append(missionTeaser, resume); }
     }
     append(featureCopy, missionTeaser);
     const art = element('div', 'feature-art');
-    const image = element('img'); image.src = era.art || `./art/era-${eraIndex + 1}.svg`; image.alt = `Original illustration of ${era.name}`; image.draggable = false;
-    append(art, image, element('div', 'art-caption', `${String(eraIndex + 1).padStart(2, '0')} — EIGHT AGES. ONE ART OF COMMAND.`));
+    const image = element('img'); image.src = './art/campaign-cover.webp'; image.alt = ''; image.draggable = false; image.width=1916;image.height=821;
+    append(art, image);
     append(feature, featureCopy, art); append(page, feature);
-    const missionsHeader = element('div', 'section-heading'); append(missionsHeader, element('h2', '', 'The campaign'), element('span', '', 'Five fields. Five different ways to think.')); append(page, missionsHeader);
+    const eraDetail=element('div','era-detail');const eraImage=element('img');eraImage.src=era.art;eraImage.alt='';eraImage.width=120;eraImage.height=82;append(eraDetail,eraImage,append(element('div','era-detail-copy'),element('span','eyebrow','Mission intelligence'),element('strong','',selected.subtitle)),stat('Deployment budget',`${selected.resources[0]}`),stat('Base army',`${selected.capacity}`),stat('Strategic sites',`${selected.strongholds.length-2}`));append(page,eraDetail);
+    const missionsHeader = element('div', 'section-heading'); append(missionsHeader, element('h2', '', 'Choose your next battle'), element('span', '', 'Five fields. Five different ways to think.')); append(page, missionsHeader);
     const cards = element('div', 'mission-grid');
     missions.forEach(item => {
       const record = campaign.records[item.id]; const unlocked = missionUnlocked(item);
       const card = button('', () => showMission(item), `mission-card ${!unlocked ? 'locked' : ''} ${record?.victory ? 'completed' : ''} ${item.id === selected.id ? 'next' : ''}`);
       const cardTop = element('div', 'mission-card-top'); append(cardTop, label(String(item.index + 1).padStart(2, '0'), 'mission-number'), label(record?.victory ? '✓ COMPLETE' : unlocked ? 'AVAILABLE' : 'LOCKED', 'mission-state'));
-      append(card, cardTop, element('h3', '', item.name), element('p', '', item.subtitle));
+      const preview=element('div','mission-preview');append(preview,mapPreview(item));const pin=element('span','mission-preview-marker');pin.append(svgIcon(record?.victory?'check':unlocked?'flag':'lock'));preview.append(pin);
+      append(card, preview,cardTop, element('h3', '', item.name), element('p', '', item.subtitle));
       const bottom = element('div', 'mission-card-bottom'); append(bottom, label(item.finale ? 'ERA FINALE ✦' : `BATTLE ${item.index + 1}`, item.finale ? 'finale-tag' : ''), label(record?.bestScore ? `${number(record.bestScore)} SCORE` : unlocked ? 'VIEW BRIEFING ↗' : '⌑')); append(card, bottom); append(cards, card);
     }); append(page, cards);
-    const footer = element('footer', 'campaign-footer'); append(footer, label('STRATEGY IS TIME WELL SPENT.', 'footer-note'), utilityBar()); append(page, footer);
-    append(root, page);
+    const footer = element('footer', 'campaign-footer'); append(footer, append(element('div','save-status'),element('i','status-dot'),label('All progress is saved automatically.','footer-note')), utilityBar()); append(page, footer);
+    append(shell,sidebar,page);append(root,shell);
   }
   function showMission(item: MissionDef) {
     const unlocked = missionUnlocked(item); const record = campaign.records[item.id];
     const dialog = openModal(item.name, 'briefing-modal');
+    append(dialog, append(element('div','briefing-map'),mapPreview(item)));
     append(dialog, element('p', 'eyebrow', `AGE ${ROMAN[item.era]} / BATTLE ${item.index + 1}${item.finale ? ' / ERA FINALE' : ''}`), element('p', 'briefing-subtitle', item.subtitle), element('p', 'modal-copy', item.briefing));
     const facts = element('div', 'briefing-facts');
     append(facts, stat('STARTING SUPPLIES', number(item.resources[0])), stat('BASE CAPACITY', `${item.capacity}`), stat('TARGET TIME', clock(item.parTime)), stat('BEST SCORE', record ? number(record.bestScore) : '—'));
-    append(dialog, facts, element('p', 'objective-note', 'OBJECTIVE · Capture the enemy main stronghold.'));
+    append(dialog, facts, element('p', 'objective-note', 'OBJECTIVE · Capture the enemy main stronghold.'),element('p','mission-concept',item.concept));
+    const roster=element('div','briefing-roster');for(const unit of content.eras[item.era]!.units.filter(unit=>item.roster.includes(unit.role)&&(!unit.skill||campaign.skills.includes(unit.skill)))){const chip=element('span','roster-chip');localAttribute(chip,'title',unit.description);append(chip,svgIcon(unit.role),label(unit.name));append(roster,chip);}append(dialog,roster);
     if (unlocked) append(dialog, button(record?.victory ? 'Replay battle →' : 'Take command →', () => { closeModal(); options.onStart(item.id, false); }, 'primary'));
     else append(dialog, element('p', 'locked-note', 'Win the previous battle to unlock this field. You can inspect every era while you progress.'));
   }
@@ -193,17 +268,20 @@ export function mountUI(options: UIOptions): GameUI {
     append(top, brand(true));
     const missionHeading = element('div', 'battle-mission'); append(missionHeading, element('small', '', `${ROMAN[found.era]} / ${String(found.index + 1).padStart(2, '0')}`), element('strong', '', found.name)); append(top, missionHeading);
     const telemetry = element('div', 'telemetry');
-    for (const [key, caption] of [['supplies', 'SUPPLIES'], ['army', 'ARMY'], ['score', 'SCORE'], ['time', 'TIME']]) { const item = stat(caption!, '—'); item.dataset.stat = key; append(telemetry, item); }
-    pauseButton = button('Ⅱ Pause', () => { if (state) send({ type: 'pause', value: !state.paused }); }, 'pause-button', 'Tactical pause (Space)');
+    for (const [key, caption] of [['supplies', 'SUPPLIES'], ['army', 'ARMY'], ['score', 'SCORE'], ['time', 'TIME']]) { const item = stat(caption!, '—'); item.dataset.stat = key; item.prepend(svgIcon(key==='time'?'clock':key as IconName)); append(telemetry, item); }
+    pauseButton = withIcon(button('Ⅱ Pause', () => { if (state) send({ type: 'pause', value: !state.paused }); }, 'pause-button', 'Tactical pause (Space)'), 'pause');
     pauseButton.dataset.testid = 'pause';
-    append(top, telemetry, pauseButton, button('Civilization', openSkills, 'quiet-button'), button('☰', battleMenu, 'icon-button', 'Battle menu'));
-    const viewport = element('div', 'battle-viewport'); viewport.id = 'battle-viewport'; viewport.setAttribute('aria-label', 'Isometric battle map');
-    contextual = element('section', 'context-panel'); contextual.setAttribute('aria-label', 'Selected object controls');
+    const battleSettings=withIcon(button('',settings,'icon-button','Settings'),'settings');battleSettings.dataset.testid='battle-settings';
+    append(top, telemetry, pauseButton, withIcon(button('Civilization', openSkills, 'quiet-button'),'tree'), battleSettings,withIcon(button('', battleMenu, 'icon-button', 'Battle menu'),'menu'));
+    const viewport = element('div', 'battle-viewport'); viewport.id = 'battle-viewport'; localAttribute(viewport, 'aria-label', 'Isometric battle map');
+    contextual = element('section', 'context-panel'); localAttribute(contextual, 'aria-label', 'Selected object controls');
     const minimapWrap = element('aside', 'minimap-wrap'); append(minimapWrap, element('div', 'minimap-label', 'THE FIELD  /  LEFT: VIEW · RIGHT: ORDER'));
-    minimap = element('canvas', 'minimap'); minimap.width = 480; minimap.height = 264; minimap.setAttribute('aria-label', 'Interactive minimap'); minimap.dataset.testid = 'minimap'; minimap.tabIndex = 0;
+    minimap = element('canvas', 'minimap'); minimap.width = 480; minimap.height = 264; localAttribute(minimap, 'aria-label', 'Interactive minimap'); minimap.dataset.testid = 'minimap'; minimap.tabIndex = 0;
     minimap.addEventListener('pointerdown', minimapPointer); minimap.addEventListener('contextmenu', event => event.preventDefault());
     append(minimapWrap, minimap, element('div', 'minimap-legend', '● YOUR ARMY   ● ENEMY IN SIGHT   ◇ STRONGHOLD'));
-    append(battleRoot, top, viewport, contextual, minimapWrap); append(root, battleRoot);
+    const planning=element('div','pause-indicator');append(planning,svgIcon('pause'),label('TACTICAL PAUSE · PLAN FREELY'));planning.hidden=true;
+    const mapControls=element('div','map-controls');append(mapControls,withIcon(button('',selectHome,'map-control','Main stronghold'),'home'),withIcon(button('',()=>{if(!state)return;selection={units:state.units.filter(unit=>unit.owner===0).map(unit=>unit.id),stronghold:null};renderer?.setSelection(selection);panelFingerprint='';renderContext();},'map-control','Select all soldiers'),'select'),withIcon(button('',help,'map-control','Battle controls'),'guide'));
+    append(viewport,planning,mapControls);append(battleRoot, top, viewport, contextual, minimapWrap); append(root, battleRoot);
     renderer = createRenderer({ parent: viewport, content, mission: found, onSelect: (incoming, additive) => {
       selection = { units: additive ? [...new Set([...selection.units, ...incoming.units])] : incoming.units, stronghold: incoming.stronghold };
       if (selection.stronghold) selection.units = [];
@@ -215,7 +293,7 @@ export function mountUI(options: UIOptions): GameUI {
   function battleMenu() {
     const dialog = openModal('Command desk', 'battle-menu');
     const concede = button('Concede battle', confirmConcede, 'secondary'); concede.disabled = !state || state.ended; concede.dataset.testid = 'concede-battle';
-    append(dialog, element('p', 'modal-copy', 'The field continues while this menu is open. Use tactical pause whenever you need time to think.'), button('Field guide & controls', help, 'secondary'), button('Save now', () => run(options.onSave, 'Battle saved.'), 'secondary'), button('Export complete save', () => run(options.onExport), 'secondary'), button('Fullscreen ⛶', () => run(async () => { if (document.fullscreenElement) await document.exitFullscreen(); else await parent.requestFullscreen(); }), 'secondary'), concede, button('Return to campaign', confirmLeave, 'primary'));
+    append(dialog, element('p', 'modal-copy', 'The field continues while this menu is open. Use tactical pause whenever you need time to think.'), withIcon(button('Field guide & controls', help, 'secondary'),'guide'),withIcon(button('Settings',settings,'secondary'),'settings'),withIcon(button('Save now', () => run(options.onSave, 'Battle saved.'), 'secondary'),'check'), withIcon(button('Export complete save', () => run(options.onExport), 'secondary'),'upload'), concede, button('Return to campaign', confirmLeave, 'primary'));
   }
   function renderTutorial() {
     battleRoot?.querySelector('.tutorial-card')?.remove(); if (!battleRoot || !tutorialOpen || screen !== 'battle') return;
@@ -234,9 +312,10 @@ export function mountUI(options: UIOptions): GameUI {
     selection.units = selection.units.filter(id => next.units.some(unit => unit.id === id && unit.owner === 0));
     renderer?.setState(next); renderer?.setSelection(selection);
     const values: Record<string, string> = { supplies: number(next.factions[0].resources), army: `${usage(next, 0, content)} / ${capacity(next, 0, content)}`, score: number(next.factions[0].score), time: clock(next.time) };
-    for (const [key, value] of Object.entries(values)) { const item = top?.querySelector(`[data-stat="${key}"] strong`); if (item) item.textContent = value; }
-    if (pauseButton) { pauseButton.textContent = next.paused ? '▷ Resume' : 'Ⅱ Pause'; pauseButton.classList.toggle('is-paused', next.paused); pauseButton.setAttribute('aria-pressed', String(next.paused)); }
+    for (const [key, value] of Object.entries(values)) { const item = top?.querySelector(`[data-stat="${key}"] strong`); if (item) setText(item, value); }
+    if (pauseButton) { setText(pauseButton, next.paused ? '▷ Resume' : 'Ⅱ Pause'); pauseButton.classList.toggle('is-paused', next.paused); pauseButton.setAttribute('aria-pressed', String(next.paused)); }
     battleRoot?.classList.toggle('tactical-pause', next.paused);
+    const indicator=battleRoot?.querySelector<HTMLElement>('.pause-indicator');if(indicator)indicator.hidden=!next.paused;
     const fp = contextKey(); if (fp !== panelFingerprint) { panelFingerprint = fp; renderContext(); }
     patchContext();
     drawMinimap();
@@ -259,17 +338,17 @@ export function mountUI(options: UIOptions): GameUI {
     const selected = ownUnits();
     if (selected.length) {
       const health = contextual.querySelector('[data-health]');
-      if (health) health.textContent = unitSummary(selected);
-      const unitAbility = contextual.querySelector<HTMLButtonElement>('[data-unit-ability]'); if (unitAbility) { const cooldown = selected[0]!.abilityCooldown; unitAbility.textContent = cooldown > 0 ? `Ability ${Math.ceil(cooldown)}s` : 'Unit ability · Q'; unitAbility.disabled = selected.every(unit => unit.abilityCooldown > 0) || faction.resources < 4; }
+      if (health) setText(health, unitSummary(selected));
+      const unitAbility = contextual.querySelector<HTMLButtonElement>('[data-unit-ability]'); if (unitAbility) { const cooldown = selected[0]!.abilityCooldown; setText(unitAbility, cooldown > 0 ? `Ability ${Math.ceil(cooldown)}s` : 'Unit ability · Q'); unitAbility.disabled = selected.every(unit => unit.abilityCooldown > 0) || faction.resources < 4; }
     }
-    for (const node of contextual.querySelectorAll<HTMLButtonElement>('[data-ability]')) { const ability = node.dataset.ability as 'rally' | 'recon' | 'volley'; const cooldown = faction.cooldowns[ability] ?? 0; node.textContent = `${titleCase(ability)} · ${cooldown > 0 ? `${Math.ceil(cooldown)}s` : `${RULES.abilityCosts[ability]} supplies`}`; node.disabled = cooldown > 0 || faction.resources < RULES.abilityCosts[ability]; }
+    for (const node of contextual.querySelectorAll<HTMLButtonElement>('[data-ability]')) { const ability = node.dataset.ability as 'rally' | 'recon' | 'volley'; const cooldown = faction.cooldowns[ability] ?? 0; setText(node, `${titleCase(ability)} · ${cooldown > 0 ? `${Math.ceil(cooldown)}s` : `${RULES.abilityCosts[ability]} supplies`}`); node.disabled = cooldown > 0 || faction.resources < RULES.abilityCosts[ability]; }
     for (const card of contextual.querySelectorAll<HTMLButtonElement>('[data-recruit]')) { const def = definitions.get(card.dataset.recruit!); card.disabled = !def || faction.resources < def.cost; }
     for (const node of contextual.querySelectorAll<HTMLElement>('[data-job]')) {
       const job = faction.lines.flatMap(line => line.queue).find(job => job.id === node.dataset.job); if (!job) continue;
-      const time = node.querySelector('.job-time'); if (time) time.textContent = job.started ? `${Math.ceil(job.remaining)}s` : 'QUEUED'; const progress = node.querySelector('progress'); if (progress) progress.value = Math.max(0, job.total - job.remaining);
+      const time = node.querySelector('.job-time'); if (time) setText(time, job.started ? `${Math.ceil(job.remaining)}s` : 'QUEUED'); const progress = node.querySelector('progress'); if (progress) progress.value = Math.max(0, job.total - job.remaining);
     }
-    for (const node of contextual.querySelectorAll<HTMLElement>('[data-production-line]')) { const line = faction.lines[Number(node.dataset.productionLine)]; if (line) node.textContent = line.blocked ? blockedReason(line.queue[0]?.unitId) : line.queue.length ? 'TRAINING' : 'READY'; }
-    const production = contextual.querySelector('[data-production-capacity]'); if (production) production.textContent = `${usage(state, 0, content)} / ${capacity(state, 0, content)} army capacity · ${faction.reserves.length} / ${faction.reserveCapacity} reserve slots · ${faction.lines.length} production ${faction.lines.length === 1 ? 'line' : 'lines'}`;
+    for (const node of contextual.querySelectorAll<HTMLElement>('[data-production-line]')) { const line = faction.lines[Number(node.dataset.productionLine)]; if (line) setText(node, line.blocked ? blockedReason(line.queue[0]?.unitId) : line.queue.length ? 'TRAINING' : 'READY'); }
+    const production = contextual.querySelector('[data-production-capacity]'); if (production) setText(production, `${usage(state, 0, content)} / ${capacity(state, 0, content)} army capacity · ${faction.reserves.length} / ${faction.reserveCapacity} reserve slots · ${faction.lines.length} production ${faction.lines.length === 1 ? 'line' : 'lines'}`);
     for (const node of contextual.querySelectorAll<HTMLButtonElement>('[data-deploy]')) { const reserve = faction.reserves.find(unit => unit.id === node.dataset.deploy); node.disabled = !reserve || usage(state, 0, content) + (definitions.get(reserve.unitId)?.capacity ?? 1) > capacity(state, 0, content); }
     const capture = contextual.querySelector<HTMLProgressElement>('.capture-display progress'); const stronghold = state.strongholds.find(item => item.id === selection.stronghold); if (capture && stronghold) capture.value = Math.min(1, stronghold.progress / 100);
   }
@@ -294,7 +373,7 @@ export function mountUI(options: UIOptions): GameUI {
       append(contextual, facts); return;
     }
     const empty = element('div', 'empty-context');
-    append(empty, element('div', 'context-emblem', '✳'), panelHeading(state.paused ? 'The field is yours to plan.' : 'A clear view. A considered move.', state.paused ? 'TACTICAL PAUSE' : 'COMMAND DESK', 'Select soldiers for orders, or your main stronghold to recruit. Shift + right-click adds to a plan.'));
+    append(empty, append(element('div', 'context-emblem'), svgIcon('target')), panelHeading(state.paused ? 'The field is yours to plan.' : 'A clear view. A considered move.', state.paused ? 'TACTICAL PAUSE' : 'COMMAND DESK', 'Select soldiers for orders, or your main stronghold to recruit. Shift + right-click adds to a plan.'));
     const actions = element('div', 'empty-actions'); append(actions, button('⌂ Main stronghold', selectHome, 'secondary'), button('Controls ↗', help, 'text-button'));
     for (const ability of ['rally', 'recon', 'volley'] as const) if (purchased(ability)) { const abilityButton = button(`${titleCase(ability)} · ${RULES.abilityCosts[ability]} supplies`, () => triggerAbility(ability), 'small-button'); abilityButton.dataset.ability = ability; append(actions, abilityButton); }
     append(empty, actions); append(contextual, empty);
@@ -359,7 +438,7 @@ export function mountUI(options: UIOptions): GameUI {
     const kind = element('select'); for (const name of ['move', 'attack', 'defend', 'capture', 'rally'] as const) { const option = element('option', '', titleCase(name)); option.value = name; append(kind, option); } kind.value = existing.kind;
     const x = element('input'); x.type = 'number'; x.min = '0'; x.max = String(mission.map[0]!.length - 1); x.step = '1'; x.value = String(Math.round(existing.x)); x.required = true;
     const y = element('input'); y.type = 'number'; y.min = '0'; y.max = String(mission.map.length - 1); y.step = '1'; y.value = String(Math.round(existing.y)); y.required = true;
-    const field = (name: string, control: HTMLElement) => { control.setAttribute('aria-label', name); return append(element('label', 'form-field'), label(name), control); };
+    const field = (name: string, control: HTMLElement) => { localAttribute(control, 'aria-label', name); return append(element('label', 'form-field'), label(name), control); };
     append(form, field('ORDER', kind), field('MAP X', x), field('MAP Y', y));
     const submit = element('button', 'primary', index === null ? 'Add to plan' : 'Update plan'); submit.type = 'submit';
     append(form, element('p', 'form-note', `Applies this plan to ${ids.length} selected soldier${ids.length === 1 ? '' : 's'}. You can also append orders with Shift + right-click.`), submit);
@@ -404,11 +483,11 @@ export function mountUI(options: UIOptions): GameUI {
     for (const unit of units) {
       const card = button('', () => send({ type: 'recruit', side: 0, unitId: unit.id }), 'recruit-card', `${unit.description}\n${unit.hp} health · ${unit.damage} damage · ${unit.armor} armor · ${unit.range} range · ${unit.vision} vision`);
       card.dataset.recruit = unit.id; card.dataset.testid = `recruit-${unit.id}`;
-      const icon = element('span', `unit-role-icon ${unit.role}`, roleIcon(unit));
+      const portrait = element('span', `unit-role-icon ${unit.role}`); portrait.append(svgIcon(unit.role));
       const trainingBonus = content.skills.reduce((total, skill) => total + (faction.skills.includes(skill.id) && skill.effect === 'training' && (skill.era === null || skill.era === mission!.era) ? skill.value : 0), 0);
       const trainingTime = unit.training * Math.max(.35, 1 - trainingBonus);
       const details = element('div'); append(details, element('strong', '', unit.name), element('small', '', `${unit.cost} supplies · ${unit.capacity} cap · ${Math.round(trainingTime * 10) / 10}s`));
-      append(card, icon, details, label('+', 'recruit-plus')); card.disabled = faction.resources < unit.cost; card.setAttribute('aria-label', `Recruit ${unit.name}, ${unit.cost} supplies, ${unit.capacity} capacity, ${Math.round(trainingTime * 10) / 10} seconds`); append(roster, card);
+      append(card, portrait, details, label('+', 'recruit-plus')); card.disabled = faction.resources < unit.cost; localAttribute(card, 'aria-label', `Recruit ${unit.name}, ${unit.cost} supplies, ${unit.capacity} capacity, ${Math.round(trainingTime * 10) / 10} seconds`); append(roster, card);
     }
     if (!units.length) append(roster, element('p', 'queue-empty', 'No units currently unlocked for this mission.'));
     const factory = element('div', 'factory-panel');
@@ -498,7 +577,7 @@ export function mountUI(options: UIOptions): GameUI {
     const intro = element('div', 'skill-intro');
     append(intro, element('p', '', activeAttempt ? 'Inspect your civilization at any time. Finish or concede the active battle before purchasing knowledge or redistributing skills.' : 'Build a civilization, one decision at a time. Permanent knowledge crosses the ages; era knowledge shapes its army.'), stat('AVAILABLE KNOWLEDGE', `${campaign.points} SP`)); append(dialog, intro);
     const tools = element('div', 'skill-toolbar');
-    const filters = element('select'); filters.setAttribute('aria-label', 'Era skill branch'); content.eras.forEach((era, index) => { const option = element('option', '', `${ROMAN[index]} · ${era.name}`); option.value = String(index); append(filters, option); }); filters.value = String(skillEra);
+    const filters = element('select'); localAttribute(filters, 'aria-label', 'Era skill branch'); content.eras.forEach((era, index) => { const option = element('option', '', `${ROMAN[index]} · ${era.name}`); option.value = String(index); append(filters, option); }); filters.value = String(skillEra);
     const zoomOut = button('−', () => applyZoom(Math.max(0.55, zoom - 0.15)), 'small-button', 'Zoom out'); const zoomIn = button('+', () => applyZoom(Math.min(1.75, zoom + 0.15)), 'small-button', 'Zoom in');
     const respec = button('Respec · 1 SP', () => { const error = options.onRespec(); if (error) notify(error); else { notify('Knowledge refunded. Respec cost: 1 SP.'); drawTree(); } }, 'secondary'); respec.disabled = activeAttempt;
     append(tools, filters, label('DRAG TO PAN · SCROLL TO EXPLORE', 'eyebrow'), zoomOut, zoomIn, respec); append(dialog, tools);
@@ -526,7 +605,7 @@ export function mountUI(options: UIOptions): GameUI {
         node.style.left = `${nodeX(skill)}px`; node.style.top = `${skill.y}px`;
         append(node, label(skill.era === null ? 'CIVILIZATION' : `AGE ${ROMAN[skill.era]}`, 'eyebrow'), element('strong', '', skill.name), element('span', 'skill-node-bottom', bought ? '✓ LEARNED' : `${skill.cost} SP${!prerequisites ? ' · PREREQUISITE REQUIRED' : ''}`)); append(tree, node);
       }
-      const points = intro.querySelector('strong'); if (points) points.textContent = `${campaign.points} SP`; applyZoom(zoom);
+      const points = intro.querySelector('strong'); if (points) setText(points, `${campaign.points} SP`); applyZoom(zoom);
     }
     function showSkill(skill: SkillDef, redraw: () => void) {
       dialog.querySelector('.skill-detail')?.remove();
@@ -551,8 +630,15 @@ export function mountUI(options: UIOptions): GameUI {
     append(actions, button('Campaign', renderCampaign, 'secondary'), button('Civilization tree', openSkills, 'text-button')); append(result, actions); append(page, result); append(root, page);
   }
   function onKey(event: KeyboardEvent) {
-    const target = event.target as HTMLElement; if (target.closest('input,select,textarea') || target.isContentEditable) return;
+    const target = event.target as HTMLElement;
+    if (modal && event.key === 'Tab') {
+      const controls=[...modal.querySelectorAll<HTMLElement>('button:not(:disabled),input:not([hidden]),select,textarea,[tabindex="0"]')].filter(node=>node.offsetParent!==null);
+      const first=controls[0],last=controls[controls.length-1];
+      if(first&&last){if(event.shiftKey&&(document.activeElement===first||!modal.contains(document.activeElement))){event.preventDefault();last.focus();}else if(!event.shiftKey&&(document.activeElement===last||!modal.contains(document.activeElement))){event.preventDefault();first.focus();}}
+      return;
+    }
     if (event.key === 'Escape') { if (modal) closeModal(); else if (screen === 'battle') { selection = { units: [], stronghold: null }; renderer?.setSelection(selection); productionExpanded = false; renderContext(); } return; }
+    if (target.closest('input,select,textarea') || target.isContentEditable) return;
     if (modal || screen !== 'battle' || !state) return;
     if (event.code === 'Space') { event.preventDefault(); send({ type: 'pause', value: !state.paused }); return; }
     if (/^Digit[1-9]$/.test(event.code)) {
@@ -562,7 +648,7 @@ export function mountUI(options: UIOptions): GameUI {
       else { selection = { units: (groups.get(index) ?? []).filter(id => state!.units.some(unit => unit.id === id && unit.owner === 0)), stronghold: null }; renderer?.setSelection(selection); renderContext(); }
       return;
     }
-    switch (event.key.toLowerCase()) {
+    switch (event.code.startsWith('Key') ? event.code.slice(3).toLowerCase() : event.key.toLowerCase()) {
       case 's': if (selection.units.length) send({ type: 'editOrders', side: 0, ids: [...selection.units], orders: [] }); break;
       case 'h': selectHome(); break;
       case 'f': { const selected = ownUnits(); const formations = FORMATIONS.filter(formation => ['line', 'column'].includes(formation) || purchased('formations')); const next = formations[(formations.indexOf(selected[0]?.formation ?? 'line') + 1) % formations.length]!; if (selected.length) send({ type: 'formation', side: 0, ids: [...selection.units], formation: next }); break; }
@@ -576,7 +662,7 @@ export function mountUI(options: UIOptions): GameUI {
   renderCampaign();
   return {
     beginBattle, setState,
-    setCampaign(nextCampaign: Campaign, nextSavedBattle?: BattleState | null) { campaign = nextCampaign; if (nextSavedBattle !== undefined) savedBattle = nextSavedBattle; if (screen === 'campaign') { if (modal) campaignDirty = true; else renderCampaign(); } },
+    setCampaign(nextCampaign: Campaign, nextSavedBattle?: BattleState | null) { campaign = nextCampaign; if (nextSavedBattle !== undefined) savedBattle = nextSavedBattle; if((campaign.language??'en')!==getLanguage())applyLanguage(campaign.language??'en');if (screen === 'campaign') { if (modal) campaignDirty = true; else renderCampaign(); } },
     showResults, showCampaign: renderCampaign, notify,
     destroy() { destroyed = true; renderer?.destroy(); closeModal(); window.removeEventListener('keydown', onKey); root.remove(); toasts.remove(); },
   };

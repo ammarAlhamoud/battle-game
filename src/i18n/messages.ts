@@ -1,5 +1,8 @@
 /** Interface copy. Content names and authored briefings live in content-ar.ts. */
 export const arMessages: Readonly<Record<string, string>> = {
+  'Aa': 'Aa', 'Fullscreen': 'ملء الشاشة',
+  'TACTICAL PAUSE · PLAN FREELY': 'إيقاف تكتيكي · خطط بحرية',
+  'PLAN FREELY': 'خطط بحرية', 'Pause': 'إيقاف', 'Resume': 'استئناف',
   'EIGHTFOLD': 'EIGHTFOLD',
   'THE ART OF COMMAND': 'فن القيادة',
   'Origins': 'البدايات', 'Bronze': 'البرونز', 'Classical': 'الكلاسيكي', 'Medieval': 'الوسيط',

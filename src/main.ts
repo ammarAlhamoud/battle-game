@@ -92,6 +92,11 @@ async function boot(): Promise<void> {
       const link = document.createElement('a'); link.href = url; link.download = 'eightfold-save.json'; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     },
+    onLanguageChange(language) {
+      campaign.language = language;
+      ui.setCampaign(campaign, battle);
+      void persist().catch(error => ui.notify(`Save failed: ${String(error)}`));
+    },
     async onImport(file) {
       if (inBattle) throw new Error('Return to the campaign before importing a save.');
       const imported = await importSave(file, content);

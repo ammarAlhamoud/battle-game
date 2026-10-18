@@ -10,6 +10,7 @@ export interface UIOptions {
   onCommand(command: Command): void;
   onBuySkill(id: string): string | null;
   onRespec(): string | null;
+  onLanguageChange(language: 'en' | 'ar'): void;
   onExport(): Promise<void>;
   onImport(file: File): Promise<void>;
   onOffline(progress: (value: number) => void): Promise<void>;
