@@ -654,7 +654,7 @@ export function mountUI(options: UIOptions): GameUI {
   }
   function showResults(results: ResultsData) {
     renderer?.destroy(); renderer = null; state = null; screen = 'results'; closeModal(); root.replaceChildren(); root.classList.remove('in-battle');
-    const played = content.missions.find(item => item.id === results.missionId)!; const page = element('main', 'results-page'); page.style.setProperty('--results-art',`url('./art/era-cover-${played.era+1}.webp')`);append(page, brand());
+    const played = content.missions.find(item => item.id === results.missionId)!; const page = element('main', 'results-page'); page.style.setProperty('--results-art',`url("${new URL(`./art/era-cover-${played.era+1}.webp`,document.baseURI).href}")`);append(page, brand());
     const result = element('section', 'results-card'); append(result, element('div', `result-seal ${results.victory ? '' : 'defeat'}`, results.victory ? '✦' : '↶'), element('p', 'eyebrow', `${content.eras[played.era]!.name} / ${played.name}`), element('h1', '', results.victory ? 'Ground gained.' : 'A lesson from the field.'), element('p', 'result-description', results.victory ? 'The field is yours. Carry this knowledge into the next battle.' : 'Your campaign endures. Reconsider your army, your approach, and the ground you choose.'));
     const stats = element('div', 'results-stats'); append(stats, stat('PERFORMANCE SCORE', number(results.score)), stat('KNOWLEDGE EARNED', `+${results.reward} SP`), stat('PERSONAL BEST', number(campaign.records[played.id]?.bestScore ?? results.score))); append(result, stats);
     const actions = element('div', 'result-actions'); const next = nextMission();

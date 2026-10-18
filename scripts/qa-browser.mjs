@@ -187,6 +187,12 @@ try {
   await waitFor(async () => /01:11/.test(await page.getByTestId('resume-battle').innerText()), 'late battle import did not finish');
   await page.getByTestId('resume-battle').click();
   await page.getByRole('heading', { name: 'Ground gained.', exact: true }).waitFor({ timeout: 15000 });
+  assert.ok(await page.locator('.results-page').evaluate(async element => {
+    const source = getComputedStyle(element, '::before').backgroundImage.match(/url\("([^\"]+)"\)/)?.[1];
+    if (!source) return false;
+    const image = new Image(); image.src = source; await image.decode();
+    return image.naturalWidth === 768 && image.naturalHeight === 256;
+  }), 'the era-specific result background must decode as the real image');
   await screenshot('victory');
   const finished = await currentSave();
   assert.equal(finished.campaign.records.e1m1.victory, true);
