@@ -60,6 +60,8 @@ Buy civilization or era skills between missions. Older era skills remain recorde
 
 The contextual command panel supports editing and reordering planned actions. Skill connections, requirements, costs, and purchased states are shown in a pannable, zoomable tree. During combat the tree can be inspected; purchases are blocked.
 
+Choose **Settings → Graphics quality** for **High detail** (the default, native render resolution) or **Adaptive performance** (reduces resolution on slower devices). The setting applies during a battle and persists locally. Infantry, cavalry, vehicles, siege engines, structures and terrain have distinct artwork across all eight eras; recruitment portraits show the actual battlefield designs. See the [art gallery and implementation](docs/ART_DIRECTION.md).
+
 ## Saving
 
 IndexedDB stores the campaign and complete active battle together, with a previous valid snapshot retained for recovery. Autosave runs every five seconds. Returning to the campaign saves and pauses the battle; resume restores both armies, queues, reserves, orders, fog history, AI plans, structures, resources, and cooldowns. Hiding the browser tab automatically pauses the battle.
@@ -91,6 +93,6 @@ The automated suites use Node's test runner against the same TypeScript simulati
 
 The interface was redesigned using the installed [UI UX Pro Max skill](.agents/skills/ui-ux-pro-max/SKILL.md): a dark command center, unified SVG icons, mission-map previews and locally packaged English/Arabic typography. Decisions are recorded in the [design system](design-system/eightfold/MASTER.md).
 
-Terrain, equipment, architecture, era illustrations, icons and animations are original programmatically authored artwork. The campaign cover is original AI-assisted key art. Local Manrope and IBM Plex Sans Arabic font files include their OFL licenses. See [asset provenance](docs/ASSETS.md). Phaser and the development dependencies retain their respective licenses.
+Terrain, equipment, architecture, era illustrations, icons and animations are original programmatically authored artwork. Campaign covers use original AI-assisted key art. Local Manrope and IBM Plex Sans Arabic font files include their OFL licenses. See [asset provenance](docs/ASSETS.md). Phaser and the development dependencies retain their respective licenses.
 
 See [the specification](docs/SPECIFICATION.md), [mission design](docs/CONTENT.md), [AI/navigation design](docs/NAVIGATION_AI.md), and [implementation ownership](docs/IMPLEMENTATION.md). Verified behavior and remaining limitations are documented separately from the requested specification.

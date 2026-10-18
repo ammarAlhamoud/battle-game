@@ -22,3 +22,13 @@ The RTL queries returned no indexed match. Arabic support therefore uses native 
 ## Review
 
 Review campaign, briefing, battle, production, orders, skills, settings, tutorials and results in both languages at 1440×1000 and 1100×760. Check smaller campaign layouts, text wrapping, keyboard controls, saves and offline reload. Verify actual interactions after visual changes.
+
+## Battlefield illustration
+
+The in-game artwork uses detailed original 2D miniatures with warm upper-left lighting, restrained outlines, material gradients and recognizable equipment silhouettes. Armor, leather, cloth, timber, masonry and machinery retain different surface treatments. Era identity changes anatomy/equipment and architecture, rather than applying a new color to the same model.
+
+Infantry, cavalry, crews, vehicles, drones and walkers have articulated rest/left stride/right stride/attack poses. Team trim and animated pennants remain teal/coral. Tree crowns and buildings sort by ground depth; selection and health indicators remain legible. Ground capture markers use the simulation's actual projected radius. Painted silhouettes accept clicks on their upper bodies, weapons and roofs.
+
+Native render resolution is the default **High detail** setting. **Adaptive performance** may reduce resolution on slower devices. This preference is saved independently of the battle and never changes simulation balance. Atlas generation happens once per active era; frame updates use textured sprites and bounded visual effects.
+
+The research tree uses engraved gold/ivory/teal medallions, visible prerequisite curves, separate permanent/era branches and distinct acquired/available/locked/inspected states. Desktop detail panels reserve space beside the tree. Original unit/building portraits connect recruitment, selection and reserves to the battlefield artwork.
