@@ -90,6 +90,7 @@ export function mountUI(options: UIOptions): GameUI {
   let contextual: HTMLElement | null = null;
   let minimap: HTMLCanvasElement | null = null;
   let pauseButton: HTMLButtonElement | null = null;
+  let requestedPause: boolean | null = null;
   let battleRoot: HTMLElement | null = null;
   let modal: HTMLElement | null = null;
   let modalClose: (() => void) | null = null;
@@ -214,7 +215,7 @@ export function mountUI(options: UIOptions): GameUI {
     const grid = element('div', 'guide-grid');
     const bindings = [['Left-click / drag', 'Select a soldier, stronghold or group'], ['Right-click', 'Move, attack, capture or defend'], ['Shift + right-click', 'Append an order to your plan'], ['A + left-click', 'Advance and engage; normal Move disengages'], ['Target + Escape', 'Cancel targeting without spending supplies'], ['Spacebar', 'Pause both armies; keep planning'], ['W A S D / arrows', 'Pan the map'], ['Wheel / middle drag', 'Zoom / pan the map'], ['Ctrl + 1–9', 'Assign selected soldiers to a group'], ['Shift + 1–9', 'Add soldiers to a control group'], ['1–9', 'Recall a control group'], ['F / S / H', 'Cycle formation / stop / focus home'], ['Q / R / T / V', 'Unit ability / rally / recon / volley'], ['Escape', 'Close a panel or clear selection']];
     for (const [key, action] of bindings) append(grid, element('kbd', '', key), element('span', '', action));
-    append(dialog, grid, button('Replay field tutorial', () => { closeModal(); tutorialStep = 0; tutorialOpen = true; campaign.tutorial = true; if (screen === 'battle') { tutorialOwnsPause = !state?.paused; send({ type: 'pause', value: true }); renderTutorial(); } else notify('The field tutorial will begin when you enter a battle.'); }, 'secondary'));
+    append(dialog, grid, button('Replay field tutorial', () => { closeModal(); tutorialStep = 0; tutorialOpen = true; campaign.tutorial = true; if (screen === 'battle') { tutorialOwnsPause = !(requestedPause ?? state?.paused); requestPause(true); renderTutorial(); } else notify('The field tutorial will begin when you enter a battle.'); }, 'secondary'));
   }
   function utilityBar() {
     const bar = element('div', 'utility-bar');
@@ -311,14 +312,14 @@ export function mountUI(options: UIOptions): GameUI {
     const found = content.missions.find(item => item.id === missionId); if (!found) return notify('This mission is unavailable.');
     battleIntel?.destroy(); battleIntel = null;
     renderer?.destroy(); closeModal(); root.replaceChildren(); root.classList.add('in-battle');
-    mission = found; state = null; screen = 'battle'; targetMode = null; tutorialOwnsPause = campaign.tutorial; selection = { units: [], stronghold: null }; panelFingerprint = ''; groups.clear(); productionExpanded = false;
+    mission = found; state = null; screen = 'battle'; requestedPause = null; targetMode = null; tutorialOwnsPause = campaign.tutorial; selection = { units: [], stronghold: null }; panelFingerprint = ''; groups.clear(); productionExpanded = false;
     battleRoot = element('main', 'battle-shell');
     top = element('header', 'battle-top');
     append(top, brand(true));
     const missionHeading = element('div', 'battle-mission'); append(missionHeading, element('small', '', `${ROMAN[found.era]} / ${String(found.index + 1).padStart(2, '0')}`), element('strong', '', found.name)); append(top, missionHeading);
     const telemetry = element('div', 'telemetry');
     for (const [key, caption] of [['supplies', 'SUPPLIES'], ['army', 'ARMY'], ['score', 'SCORE'], ['time', 'TIME']]) { const item = stat(caption!, '—'); item.dataset.stat = key; item.prepend(svgIcon(key==='time'?'clock':key as IconName)); append(telemetry, item); }
-    pauseButton = withIcon(button('Pause', () => { if (state) { tutorialOwnsPause = false; send({ type: 'pause', value: !state.paused }); } }, 'pause-button', 'Tactical pause (Space)'), 'pause');
+    pauseButton = withIcon(button('Pause', () => { if (state) { tutorialOwnsPause = false; requestPause(!(requestedPause ?? state.paused)); } }, 'pause-button', 'Tactical pause (Space)'), 'pause');
     pauseButton.dataset.testid = 'pause';
     const battleSettings=withIcon(button('',settings,'icon-button','Settings'),'settings');battleSettings.dataset.testid='battle-settings';
     append(top, telemetry, pauseButton, withIcon(button('Civilization', openSkills, 'quiet-button'),'tree'), battleSettings,withIcon(button('', battleMenu, 'icon-button', 'Battle menu'),'menu'));
@@ -346,10 +347,23 @@ export function mountUI(options: UIOptions): GameUI {
     const concede = button('Concede battle', confirmConcede, 'secondary'); concede.disabled = !state || state.ended; concede.dataset.testid = 'concede-battle';
     append(dialog, element('p', 'modal-copy', 'The field continues while this menu is open. Use tactical pause whenever you need time to think.'), withIcon(button('Field guide & controls', help, 'secondary'),'guide'),withIcon(button('Settings',settings,'secondary'),'settings'),withIcon(button('Save now', () => run(options.onSave), 'secondary'),'check'), withIcon(button('Export complete save', () => run(options.onExport), 'secondary'),'upload'), concede, button('Return to campaign', confirmLeave, 'primary'));
   }
+  function requestPause(value: boolean) {
+    requestedPause = value; paintPause(value);
+    if (state) send({ type: 'pause', value });
+  }
+  function paintPause(paused: boolean) {
+    if (pauseButton) {
+      setText(pauseButton, paused ? 'Resume' : 'Pause');
+      if (pauseButton.getAttribute('aria-pressed') !== String(paused)) pauseButton.querySelector('svg')?.replaceWith(svgIcon(paused ? 'play' : 'pause'));
+      pauseButton.classList.toggle('is-paused', paused); pauseButton.setAttribute('aria-pressed', String(paused));
+    }
+    battleRoot?.classList.toggle('tactical-pause', paused);
+    const indicator = battleRoot?.querySelector<HTMLElement>('.pause-indicator'); if (indicator) indicator.hidden = !paused;
+  }
   function finishTutorial() {
     tutorialOpen = false; campaign.tutorial = false;
-    if (tutorialOwnsPause && state?.paused) send({ type: 'pause', value: false });
-    tutorialOwnsPause = false; run(options.onSave);
+    if (tutorialOwnsPause && (requestedPause ?? state?.paused ?? true)) requestPause(false);
+    tutorialOwnsPause = false; if (state) run(options.onSave);
   }
   function renderTutorial() {
     battleRoot?.classList.toggle('in-tutorial', tutorialOpen);
@@ -365,19 +379,16 @@ export function mountUI(options: UIOptions): GameUI {
     }, 'text-button')); append(card, controls); append(battleRoot, card);
   }
   function setState(next: BattleState) {
-    if (screen !== 'battle') return; state = next;
+    if (screen !== 'battle') return; const first = state === null; state = next;
+    if (requestedPause === next.paused) requestedPause = null;
+    if (first && requestedPause !== null && requestedPause !== next.paused) send({ type: 'pause', value: requestedPause });
+    else if (first && tutorialOpen && tutorialOwnsPause && !next.paused) requestPause(true);
     if (targetMode && targetMode.kind === 'attack' && !next.units.some(u => u.owner === 0 && targetMode!.ids.includes(u.id))) cancelTarget();
     selection.units = selection.units.filter(id => next.units.some(unit => unit.id === id && unit.owner === 0));
     renderer?.setState(next); renderer?.setSelection(selection); battleIntel?.update(next);
     const values: Record<string, string> = { supplies: number(next.factions[0].resources), army: `${usage(next, 0, content)} / ${capacity(next, 0, content)}`, score: number(next.factions[0].score), time: clock(next.time) };
     for (const [key, value] of Object.entries(values)) { const item = top?.querySelector(`[data-stat="${key}"] strong`); if (item) setText(item, value); }
-    if (pauseButton) {
-      setText(pauseButton, next.paused ? 'Resume' : 'Pause');
-      if (pauseButton.getAttribute('aria-pressed') !== String(next.paused)) pauseButton.querySelector('svg')?.replaceWith(svgIcon(next.paused ? 'play' : 'pause'));
-      pauseButton.classList.toggle('is-paused', next.paused); pauseButton.setAttribute('aria-pressed', String(next.paused));
-    }
-    battleRoot?.classList.toggle('tactical-pause', next.paused);
-    const indicator=battleRoot?.querySelector<HTMLElement>('.pause-indicator');if(indicator)indicator.hidden=!next.paused;
+    paintPause(requestedPause ?? next.paused);
     const fp = contextKey(); if (fp !== panelFingerprint) { panelFingerprint = fp; renderContext(); }
     patchContext();
     drawMinimap();
@@ -791,7 +802,7 @@ export function mountUI(options: UIOptions): GameUI {
     if (event.key === 'Escape') { if (modal) closeModal(); else if (targetMode) cancelTarget(); else if (screen === 'battle') { selection = { units: [], stronghold: null }; renderer?.setSelection(selection); productionExpanded = false; renderContext(); } return; }
     if (target.closest('input,select,textarea') || target.isContentEditable) return;
     if (modal || screen !== 'battle' || !state) return;
-    if (event.code === 'Space') { event.preventDefault(); tutorialOwnsPause = false; send({ type: 'pause', value: !state.paused }); return; }
+    if (event.code === 'Space') { event.preventDefault(); tutorialOwnsPause = false; requestPause(!(requestedPause ?? state.paused)); return; }
     if (/^Digit[1-9]$/.test(event.code)) {
       event.preventDefault(); const index = Number(event.code.slice(-1));
       if (event.ctrlKey || event.metaKey) { groups.set(index, [...selection.units]); notify(`Control group ${index} assigned.`); }

@@ -102,3 +102,11 @@ test('unknown strings, key codes and existing Arabic are safely preserved', () =
   assert.equal(translate('EIGHTFOLD', 'ar'), 'EIGHTFOLD');
   setLanguage('en');
 });
+
+ test('unit dossier roles and counter labels have explicit Arabic translations', () => {
+  for (const role of ['Frontline', 'Ranged', 'Guard', 'Scout', 'Stealth', 'Siege', 'Engineer']) {
+    const result = translate(role, 'ar');
+    assert.match(result, /[\u0600-\u06ff]/, role);
+    assert.doesNotMatch(result, /[A-Za-z]/, role);
+  }
+});
