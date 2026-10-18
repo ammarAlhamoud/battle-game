@@ -1,5 +1,7 @@
 /** Interface copy. Content names and authored briefings live in content-ar.ts. */
 export const arMessages: Readonly<Record<string, string>> = {
+  'Graphics quality': 'جودة الرسوم', 'High detail': 'تفاصيل عالية', 'Adaptive performance': 'أداء متكيف',
+  'High detail keeps the battlefield sharp. Adaptive mode reduces render resolution on slower devices.': 'تحافظ التفاصيل العالية على وضوح الميدان. يقلل الوضع المتكيف دقة العرض على الأجهزة الأبطأ.',
   'Aa': 'Aa', 'Fullscreen': 'ملء الشاشة',
   'Field guide': 'الدليل الميداني',
   'All eras available offline': 'جميع العصور متاحة دون اتصال', 'Retry offline download': 'إعادة محاولة التنزيل',

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import type { BattleRenderer, BattleState, RendererOptions, Selection, Vec, Unit, Stronghold, Role } from '../contracts';
 import { unitVisible } from '../sim/engine';
+import { getGraphicsQuality, observeGraphicsQuality, type GraphicsQuality } from './quality';
 
 /** Original vector artwork is rasterized once into two GPU atlases. Simulation never runs here. */
 const TW = 64, TH = 32, UNIT = 72, FORT = 160;
@@ -235,6 +236,7 @@ class Battlefield extends Phaser.Scene {
   selection: Selection = {units:[],stronghold:null};
   ready = false;
   quality = 1;
+  qualityMode = getGraphicsQuality();
   widthCells: number;
   heightCells: number;
   offsetX: number;
@@ -400,6 +402,12 @@ class Battlefield extends Phaser.Scene {
     this.quality=Math.max(.65,this.quality*.8);
     camera.setZoom(camera.zoom*this.quality/prior);this.resize();camera.centerOn(center.x,center.y);this.slowFor=0;
   }
+  setGraphicsQuality(mode: GraphicsQuality): void {
+    this.qualityMode = mode;
+    if (mode !== 'high' || this.quality === 1 || !this.ready) return;
+    const camera = this.cameras.main, center = camera.getWorldPoint(camera.width / 2, camera.height / 2), prior = this.quality;
+    this.quality = 1; camera.setZoom(camera.zoom / prior); this.resize(); camera.centerOn(center.x, center.y); this.slowFor = 0;
+  }
   acceptState(state:BattleState):void {
     this.current=state;if(!this.ready)return;
     const live=new Set<string>();
@@ -515,7 +523,7 @@ class Battlefield extends Phaser.Scene {
     const elapsed=this.lastPresentation?Math.min(200,time-this.lastPresentation):delta;this.lastPresentation=time;
     this.frameMs=this.frameMs*.96+elapsed*.04;
     this.slowFor=this.frameMs>34?this.slowFor+elapsed:Math.max(0,this.slowFor-elapsed*2);
-    if(this.slowFor>2600&&this.quality>.65)this.lowerVisualResolution();
+    if(this.qualityMode==='adaptive'&&this.slowFor>2600&&this.quality>.65)this.lowerVisualResolution();
     const camera=this.cameras.main;
     const active=document.activeElement;const editing=active instanceof HTMLInputElement||active instanceof HTMLTextAreaElement||active instanceof HTMLSelectElement;
     if(!editing) {
@@ -651,6 +659,7 @@ class Battlefield extends Phaser.Scene {
 
 export function createRenderer(options:RendererOptions):BattleRenderer {
   const scene=new Battlefield(options);
+  const stopObservingQuality=observeGraphicsQuality(mode=>scene.setGraphicsQuality(mode));
   const game=new Phaser.Game({type:Phaser.WEBGL,parent:options.parent,width:options.parent.clientWidth||1100,height:options.parent.clientHeight||650,backgroundColor:'#34483c',antialias:true,transparent:false,powerPreference:'high-performance',render:{roundPixels:false,antialias:true,antialiasGL:false},scale:{mode:Phaser.Scale.FIT,autoCenter:Phaser.Scale.CENTER_BOTH},scene:[scene],input:{keyboard:true,mouse:true,touch:false},fps:{target:60,forceSetTimeOut:false},audio:{noAudio:true},banner:false});
   const observer=new ResizeObserver(()=>{if(scene.ready)scene.resize();});observer.observe(options.parent);
   let destroyed=false;
@@ -659,6 +668,6 @@ export function createRenderer(options:RendererOptions):BattleRenderer {
     setSelection(selection){scene.selection={units:[...selection.units],stronghold:selection.stronghold};},
     focus(x,y){if(!destroyed)scene.focus({x,y});},
     getViewport(){return destroyed?[]:scene.viewport();},
-    destroy(){if(destroyed)return;destroyed=true;observer.disconnect();options.parent.style.cursor='';delete options.parent.dataset.renderer;game.destroy(true);},
+    destroy(){if(destroyed)return;destroyed=true;stopObservingQuality();observer.disconnect();options.parent.style.cursor='';delete options.parent.dataset.renderer;game.destroy(true);},
   };
 }

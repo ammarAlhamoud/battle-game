@@ -1,10 +1,12 @@
 import type { BattleRenderer, BattleState, Campaign, Command, Formation, MissionDef, Order, Selection, SkillDef, Unit, UnitDef, Vec } from '../contracts';
 import type { GameUI, ResultsData, UIOptions } from '../ui-contract';
 import { createRenderer } from '../render/index';
+import { getGraphicsQuality, setGraphicsQuality, type GraphicsQuality } from '../render/quality';
 import { unitVisible, capacity, usage, unlockedUnits, RULES } from '../sim/engine';
 import { translate, getLanguage, setLanguage, type Language } from '../i18n/index';
 import { icon as svgIcon, type IconName } from './icons';
 import './style.css';
+import './art.css';
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
 const SHORT_ERAS = ['Origins', 'Bronze', 'Classical', 'Medieval', 'Gunpowder', 'Industrial', 'Modern', 'Space'];
@@ -158,6 +160,12 @@ export function mountUI(options: UIOptions): GameUI {
       append(choice, element('span', 'language-code', language === 'ar' ? 'ع' : 'Aa'), append(element('span', 'language-choice-copy'), element('strong', '', title), element('small', '', subtitle)), svgIcon('check')); append(languages, choice);
     }
     append(dialog, languages, element('p', 'settings-save-note', 'Your preference is saved automatically.'));
+    const graphics = element('div', 'settings-row');
+    const quality = element('select', 'graphics-quality'); localAttribute(quality, 'aria-label', 'Graphics quality'); quality.dataset.testid = 'graphics-quality';
+    for (const [value, name] of [['high', 'High detail'], ['adaptive', 'Adaptive performance']] as const) { const option = element('option', '', name); option.value = value; quality.append(option); }
+    quality.value = getGraphicsQuality(); quality.onchange = () => setGraphicsQuality(quality.value as GraphicsQuality);
+    append(graphics, element('span', '', 'Graphics quality'), quality);
+    append(dialog, graphics, element('p', 'settings-save-note', 'High detail keeps the battlefield sharp. Adaptive mode reduces render resolution on slower devices.'));
     const display = element('div', 'settings-row'); append(display, element('span', '', 'Fullscreen'), withIcon(button('Fullscreen', () => run(async () => { if (document.fullscreenElement) await document.exitFullscreen(); else await parent.requestFullscreen(); }), 'secondary'), 'expand'));
     append(dialog, display, button('Done', closeModal, 'primary'));
   }
