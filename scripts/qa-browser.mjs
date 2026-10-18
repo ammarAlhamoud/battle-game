@@ -155,6 +155,10 @@ try {
     const keys = await caches.keys(); const cache = await caches.open(keys.find(k => k.startsWith('eightfold-')));
     return (await cache.keys()).filter(r => /\/art\/era-\d+\.svg/.test(r.url)).length;
   }); assert.equal(eraCount, 8);
+  const covers = await page.evaluate(async () => {
+    const cache = await caches.open((await caches.keys()).find(k => k.startsWith('eightfold-')));
+    return (await cache.keys()).filter(r => /\/art\/era-cover-\d+\.webp/.test(r.url)).length;
+  }); assert.equal(covers, 8);
   await context.setOffline(true);
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('language-settings').click();

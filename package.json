@@ -11,6 +11,7 @@
     "check": "tsc --noEmit",
     "test:browser": "node scripts/qa-browser.mjs",
     "test:localization": "node scripts/qa-localization.mjs",
+    "test:art": "node scripts/qa-art.mjs",
     "test:storage": "node scripts/qa-storage.mjs",
     "test:campaign": "node scripts/simulate-campaign.mjs",
     "benchmark": "node --expose-gc scripts/benchmark.mjs"
