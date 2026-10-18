@@ -282,8 +282,9 @@ function formationGoal(state: BattleState, unit: Unit, order: Order, content: Ga
   const mission = missionOf(state, content);
   const blocked = obstacles(state, unit.owner, content);
   if (isNarrow(mission.map, unit.x, unit.y, blocked, unit.owner) || isNarrow(mission.map, order.x, order.y, blocked, unit.owner)) return { x: order.x, y: order.y };
-  const count = state.units.filter(u => u.owner === unit.owner && u.group === unit.group).length;
-  let offset = unit.group ? formationOffset(unit.slot, count, unit.formation) : { x: 0, y: 0 };
+  const survivors = state.units.filter(u => u.owner === unit.owner && u.group === unit.group && u.hp > 0).sort((a, b) => a.slot - b.slot || a.id.localeCompare(b.id));
+  const count = survivors.length, liveSlot = survivors.findIndex(u => u.id === unit.id);
+  let offset = unit.group ? formationOffset(Math.max(0, liveSlot), count, unit.formation) : { x: 0, y: 0 };
   const home = main(state, unit.owner) ?? unit, angle = Math.atan2(order.y - home.y, order.x - home.x) - Math.PI / 2;
   offset = { x: offset.x * Math.cos(angle) - offset.y * Math.sin(angle), y: offset.x * Math.sin(angle) + offset.y * Math.cos(angle) };
   if (order.kind === 'capture' || order.kind === 'build') { const length = Math.hypot(offset.x, offset.y); if (length > 1.1) offset = { x: offset.x / length * 1.1, y: offset.y / length * 1.1 }; }
