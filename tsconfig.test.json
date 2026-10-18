@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "strict": true, "skipLibCheck": true, "esModuleInterop": true,
+    "outDir": ".test-build", "rootDir": ".", "types": ["node"]
+  },
+  "include": ["src/contracts.ts", "src/content/**/*.ts", "src/sim/**/*.ts", "src/persistence/**/*.ts", "tests/**/*.ts"]
+}
