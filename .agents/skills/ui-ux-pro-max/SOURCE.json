@@ -1,0 +1,7 @@
+{
+  "name": "UI UX Pro Max",
+  "repository": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+  "commit": "56ea9cf174ed86786187daa9de0e6247cb0747e4",
+  "installation": "Project-local Codex skill; scripts/data/reference files preserved; search command paths adapted to project location.",
+  "license": "MIT"
+}
