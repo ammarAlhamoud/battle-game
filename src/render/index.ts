@@ -224,15 +224,17 @@ function drawFort(ctx: Ctx, era: number, kind: number): void {
   }
 }
 
-interface Presented { sprite: Phaser.GameObjects.Sprite; x: number; y: number; target: Vec; unit: Unit }
+interface Presented { sprite: Phaser.GameObjects.Sprite; x: number; y: number; target: Vec; unit: Unit; facing: number }
 interface FortView { image: Phaser.GameObjects.Image; owner: number | null; progress: number }
 interface Effect { x: number; y: number; target?: Vec; kind: string; birth: number; owner: number; seed: number }
+interface Fallen { sprite:Phaser.GameObjects.Sprite; birth:number; x:number; y:number; direction:number }
 
 class Battlefield extends Phaser.Scene {
   readonly opts: RendererOptions;
   current: BattleState | null = null;
   selection: Selection = {units:[],stronghold:null};
   ready = false;
+  quality = 1;
   widthCells: number;
   heightCells: number;
   offsetX: number;
@@ -252,12 +254,19 @@ class Battlefield extends Phaser.Scene {
   private effects: Effect[] = [];
   private lastEvent = -1;
   private fogTick = -1;
+  private fogVisible: boolean[] = [];
+  private fogExplored: boolean[] = [];
   private focusPending: Vec | null = null;
   private lastClick = 0;
   private lastClickedUnit = '';
   private props: Phaser.GameObjects.Image[] = [];
   private structureSprites = new Map<string,Phaser.GameObjects.Image>();
   private cameraMoved = false;
+  private motionTime = 0;
+  private fallen: Fallen[] = [];
+  private frameMs = 16.7;
+  private slowFor = 0;
+  private lastPresentation = 0;
   constructor(opts: RendererOptions) {
     super('battle');this.opts=opts;this.widthCells=opts.mission.map[0].length;this.heightCells=opts.mission.map.length;
     this.offsetX=this.heightCells*TW/2+120;
@@ -286,11 +295,11 @@ class Battlefield extends Phaser.Scene {
     this.input.on('pointermove',(p:Phaser.Input.Pointer)=>this.pointerMove(p));
     this.input.on('wheel',(_p:Phaser.Input.Pointer,_o:unknown,_x:number,dy:number)=>{
       const pointer=this.input.activePointer;const before=camera.getWorldPoint(pointer.x,pointer.y);
-      camera.setZoom(clamp(camera.zoom*(dy>0?.9:1.1),.48,1.9));
+      camera.setZoom(clamp(camera.zoom*(dy>0?.9:1.1),.48*this.quality,1.9*this.quality));
       const after=camera.getWorldPoint(pointer.x,pointer.y);camera.scrollX+=before.x-after.x;camera.scrollY+=before.y-after.y;
       this.cameraMoved=true;
     });
-    this.ready=true;this.opts.parent.dataset.renderer='ready';
+    this.ready=true;this.resize();this.opts.parent.dataset.renderer='ready';
     const home=this.opts.mission.strongholds.find(s=>s.owner===0&&s.kind==='main');
     this.focus(this.focusPending??home??{x:this.widthCells/2,y:this.heightCells/2});
     if(this.current)this.acceptState(this.current);
@@ -378,6 +387,19 @@ class Battlefield extends Phaser.Scene {
   focus(p:Vec):void {
     if(!this.ready){this.focusPending=p;return;}const pos=this.world(p);this.cameras.main.centerOn(pos.x,pos.y);this.cameraMoved=true;
   }
+  resize():void {
+    const width=this.opts.parent.clientWidth,height=this.opts.parent.clientHeight;
+    if(!width||!height)return;
+    const camera=this.ready?this.cameras.main:null;
+    const center=camera?camera.getWorldPoint(camera.width/2,camera.height/2):null;
+    this.game.scale.setGameSize(Math.round(width*this.quality),Math.round(height*this.quality));
+    if(camera&&center)camera.centerOn(center.x,center.y);
+  }
+  lowerVisualResolution():void {
+    const camera=this.cameras.main,center=camera.getWorldPoint(camera.width/2,camera.height/2),prior=this.quality;
+    this.quality=Math.max(.65,this.quality*.8);
+    camera.setZoom(camera.zoom*this.quality/prior);this.resize();camera.centerOn(center.x,center.y);this.slowFor=0;
+  }
   acceptState(state:BattleState):void {
     this.current=state;if(!this.ready)return;
     const live=new Set<string>();
@@ -385,11 +407,15 @@ class Battlefield extends Phaser.Scene {
       if(!unitVisible(state,unit,0,this.opts.content))continue;
       const def=this.opts.content.eras[this.opts.mission.era].units.find(d=>d.id===unit.defId);if(!def)continue;
       live.add(unit.id);let entry=this.presented.get(unit.id);
-      if(!entry) {const p=this.world(unit);const s=this.add.sprite(p.x,p.y,'soldiers',0).setOrigin(.5,54/UNIT);entry={sprite:s,x:unit.x,y:unit.y,target:{x:unit.x,y:unit.y},unit};this.presented.set(unit.id,entry);}
+      if(!entry) {const p=this.world(unit);const s=this.add.sprite(p.x,p.y,'soldiers',0).setOrigin(.5,54/UNIT);entry={sprite:s,x:unit.x,y:unit.y,target:{x:unit.x,y:unit.y},unit,facing:unit.facing};this.presented.set(unit.id,entry);}
       entry.target={x:unit.x,y:unit.y};entry.unit=unit;
       if(Math.hypot(entry.x-unit.x,entry.y-unit.y)>4){entry.x=unit.x;entry.y=unit.y;}
     }
-    for(const [id,p] of this.presented)if(!live.has(id)){p.sprite.destroy();this.presented.delete(id);}
+    for(const [id,p] of this.presented)if(!live.has(id)){
+      const died=state.events.some(e=>e.kind==='death'&&e.owner===p.unit.owner&&Math.hypot(e.x-p.target.x,e.y-p.target.y)<.7&&state.tick-e.tick<3);
+      if(died&&(p.unit.owner===0||this.visible(p.target))){const q=this.world(p);this.fallen.push({sprite:p.sprite,birth:this.motionTime,x:q.x,y:q.y,direction:p.sprite.flipX?-1:1});}
+      else p.sprite.destroy();this.presented.delete(id);
+    }
     for(const fort of state.strongholds) {
       if(fort.owner!==0&&!this.explored(fort))continue;
       let f=this.forts.get(fort.id);const p=this.world(fort);
@@ -411,11 +437,19 @@ class Battlefield extends Phaser.Scene {
     const now=this.time.now;
     for(const e of state.events)if(e.id>this.lastEvent) {
       const hiddenSource=e.kind==='shot'&&e.owner===1&&state.units.some(u=>u.owner===1&&Math.hypot(u.x-e.x,u.y-e.y)<.35&&!unitVisible(state,u,0,this.opts.content));
-      if(!hiddenSource&&(e.owner===0||this.visible(e))&&(!e.target||this.visible(e.target)))this.effects.push({x:e.x,y:e.y,target:e.target,kind:e.kind,birth:now,owner:e.owner,seed:e.id});
+      const targetAllowed=e.kind!=='shot'||!e.target||this.visible(e.target);
+      if(!hiddenSource&&(e.owner===0||this.visible(e))&&targetAllowed)this.effects.push({x:e.x,y:e.y,target:e.kind==='shot'?e.target:undefined,kind:e.kind,birth:now,owner:e.owner,seed:e.id});
       this.lastEvent=Math.max(e.id,this.lastEvent);
     }
-    if(this.effects.length>100)this.effects.splice(0,this.effects.length-100);
-    if(this.fogTick!==state.tick){this.drawFog();this.fogTick=state.tick;}
+    const effectLimit=this.frameMs>34?40:100;
+    if(this.effects.length>effectLimit)this.effects.splice(0,this.effects.length-effectLimit);
+    if(this.fogTick!==state.tick){
+      const next=state.fog[0];
+      if(this.fogVisible.length!==next.visible.length||next.visible.some((v,i)=>v!==this.fogVisible[i])||next.explored.some((v,i)=>v!==this.fogExplored[i])){
+        this.drawFog();this.fogVisible=[...next.visible];this.fogExplored=[...next.explored];
+      }
+      this.fogTick=state.tick;
+    }
   }
   drawFog():void {
     this.fog.clear();if(!this.current)return;
@@ -478,10 +512,14 @@ class Battlefield extends Phaser.Scene {
   }
   update(time:number,delta:number):void {
     if(!this.ready)return;
+    const elapsed=this.lastPresentation?Math.min(200,time-this.lastPresentation):delta;this.lastPresentation=time;
+    this.frameMs=this.frameMs*.96+elapsed*.04;
+    this.slowFor=this.frameMs>34?this.slowFor+elapsed:Math.max(0,this.slowFor-elapsed*2);
+    if(this.slowFor>2600&&this.quality>.65)this.lowerVisualResolution();
     const camera=this.cameras.main;
     const active=document.activeElement;const editing=active instanceof HTMLInputElement||active instanceof HTMLTextAreaElement||active instanceof HTMLSelectElement;
     if(!editing) {
-      const speed=delta*.56/camera.zoom;let dx=0,dy=0;
+      const speed=delta*.56*this.quality/camera.zoom;let dx=0,dy=0;
       const freeKeys=this.selection.units.length===0;
       if((freeKeys&&this.keys.W.isDown)||this.keys.UP.isDown)dy-=speed;if((freeKeys&&this.keys.S.isDown)||this.keys.DOWN.isDown)dy+=speed;
       if((freeKeys&&this.keys.A.isDown)||this.keys.LEFT.isDown)dx-=speed;if((freeKeys&&this.keys.D.isDown)||this.keys.RIGHT.isDown)dx+=speed;
@@ -489,16 +527,28 @@ class Battlefield extends Phaser.Scene {
       if(Phaser.Input.Keyboard.JustDown(this.keys.HOME)){const home=this.opts.mission.strongholds.find(s=>s.owner===0&&s.kind==='main');if(home)this.focus(home);}
     }
     const state=this.current;if(!state)return;
+    if(!state.paused)this.motionTime+=Math.min(delta,100);
     this.overlays.clear();this.paths.clear();this.fxGraphics.clear();this.atmosphere.clear();
     const selected=new Set(this.selection.units);
     for(const [id,v] of this.presented) {
       const amount=state.paused?1:Math.min(1,delta/70);v.x+=(v.target.x-v.x)*amount;v.y+=(v.target.y-v.y)*amount;
       const p=this.world(v);v.sprite.setPosition(p.x,p.y).setDepth(p.y+6);
       const def=this.opts.content.eras[this.opts.mission.era].units.find(d=>d.id===v.unit.defId)!;
-      const animationTime=state.paused?state.time*1000:time;
+      const animationTime=this.motionTime;
       const frame=v.unit.status==='walk'?(Math.floor(animationTime/140+v.unit.slot)%2)+1:v.unit.status==='attack'?3:0;
       const role=ROLES.indexOf(def.role);v.sprite.setFrame(((this.opts.mission.era*7+role)*2+v.unit.owner)*4+frame);
-      const direction=Math.cos(v.unit.facing)-Math.sin(v.unit.facing);v.sprite.setFlipX(direction<0);
+      const angle=Math.atan2(Math.sin(v.unit.facing-v.facing),Math.cos(v.unit.facing-v.facing));
+      if(!state.paused)v.facing+=angle*Math.min(1,delta/95);
+      const direction=Math.cos(v.facing)-Math.sin(v.facing),sign=direction<0?-1:1;v.sprite.setFlipX(direction<0);
+      const phase=animationTime/160+v.unit.slot;
+      const recoil=v.unit.status==='attack'?Math.pow(clamp(v.unit.cooldown/def.attackTime,0,1),6):0;
+      const hurtAge=state.time-v.unit.lastHit;
+      const shake=hurtAge<.28?Math.sin(animationTime/19)*2*(1-hurtAge/.28):0;
+      const brace=v.unit.status==='defend';
+      const breathe=v.unit.status==='idle'?Math.sin(animationTime/620+v.unit.slot)*.012:0;
+      v.sprite.setScale(brace?1.035:1,brace?.94:1+breathe);
+      v.sprite.setRotation((v.unit.status==='walk'?Math.sin(phase)*.017:0)-sign*recoil*.075+(brace?sign*.025:0));
+      v.sprite.setPosition(p.x-sign*recoil*2.5+shake,p.y+(v.unit.status==='walk'?Math.abs(Math.sin(phase))*.6:0));
       v.sprite.setAlpha(def.stealth&&v.unit.owner===0?.8:1);
       if(state.time-v.unit.lastHit<.18)v.sprite.setTint(0xffcec0);else v.sprite.clearTint();
       if(!camera.worldView.contains(p.x,p.y)){v.sprite.setVisible(false);continue;}v.sprite.setVisible(true);
@@ -514,6 +564,10 @@ class Battlefield extends Phaser.Scene {
         this.overlays.fillStyle(health<.28?ENEMY:v.unit.owner===0?FRIEND:ENEMY,1).fillRoundedRect(p.x-width/2,y,width*clamp(health,0,1),3,1);
       }
     }
+    this.fallen=this.fallen.filter(f=>{
+      const t=(this.motionTime-f.birth)/650;if(t>=1){f.sprite.destroy();return false;}
+      f.sprite.setPosition(f.x+f.direction*t*5,f.y+t*3).setRotation(f.direction*t*1.1).setAlpha((1-t)*.7).setDepth(f.y-1).setScale(1,1-t*.25);return true;
+    });
     for(const memory of Object.values(state.fog[0].memory)) {
       if(this.visible(memory)||state.time-memory.seen>45)continue;
       const p=this.world(memory);this.overlays.lineStyle(1,ENEMY,.3).strokeEllipse(p.x,p.y,17,8);
@@ -521,7 +575,7 @@ class Battlefield extends Phaser.Scene {
     }
     this.drawStrongholds(time);
     this.drawEffects(time);
-    this.drawAtmosphere(time);
+    if(this.frameMs<34&&this.presented.size<180)this.drawAtmosphere(time);
     if(this.drag&&!this.drag.middle){const p=this.input.activePointer;if(Math.hypot(p.x-this.drag.x,p.y-this.drag.y)>7){this.dragGraphics.clear().fillStyle(FRIEND,.1).fillRect(this.drag.x,this.drag.y,p.x-this.drag.x,p.y-this.drag.y).lineStyle(1,FRIEND,.9).strokeRect(this.drag.x,this.drag.y,p.x-this.drag.x,p.y-this.drag.y);}}
     if(this.cameraMoved){this.opts.parent.dispatchEvent(new CustomEvent('camera-move'));this.cameraMoved=false;}
   }
@@ -569,9 +623,12 @@ class Battlefield extends Phaser.Scene {
         this.fxGraphics.lineStyle(this.opts.mission.era===7?2:1.5,this.opts.mission.era===7?color:0xf1dfa5,.95).lineBetween(x,y,x-(q.x-p.x)*.08,y-(q.y-p.y)*.08);
         this.fxGraphics.fillStyle(0xffefbc,.9).fillCircle(x,y,2);
       } else if(e.kind==='hit'||e.kind==='death') {
-        const n=e.kind==='death'?7:4;
+        const n=this.frameMs>34?3:e.kind==='death'?7:4;
         for(let i=0;i<n;i++){const a=rand(i,e.seed,7)*Math.PI*2,d=(8+rand(i,e.seed,8)*15)*age;this.fxGraphics.fillStyle(i%2?0xe7d5a2:color,alpha*.9).fillCircle(p.x+Math.cos(a)*d,p.y-12+Math.sin(a)*d+age*10,Math.max(.5,2.2*(1-age)));}
         if(e.kind==='death')this.fxGraphics.lineStyle(1,0xd9ceb0,alpha*.5).strokeEllipse(p.x,p.y,age*42,age*20);
+      } else if(e.kind==='ability') {
+        for(let ring=0;ring<3;ring++){const t=clamp(age*1.4-ring*.13,0,1);if(t>0)this.fxGraphics.lineStyle(1.5,color,(1-t)*.7).strokeEllipse(p.x,p.y,15+t*95,8+t*45);}
+        for(let i=0;i<7;i++){const a=i/7*Math.PI*2,x=p.x+Math.cos(a)*(10+age*24),y=p.y+Math.sin(a)*(5+age*11)-age*32;this.fxGraphics.lineStyle(1.6,i%2?0xe4e6bb:color,alpha*.8).lineBetween(x,y,x,y+5);}
       } else {
         this.fxGraphics.lineStyle(e.kind==='capture'?2:1.5,color,alpha*.8).strokeEllipse(p.x,p.y,12+age*(e.kind==='capture'?140:45),6+age*(e.kind==='capture'?65:23));
         if(e.kind==='deploy'||e.kind==='build')this.fxGraphics.lineStyle(1,color,alpha*.4).lineBetween(p.x,p.y,p.x,p.y-40*(1-age));
@@ -594,13 +651,14 @@ class Battlefield extends Phaser.Scene {
 
 export function createRenderer(options:RendererOptions):BattleRenderer {
   const scene=new Battlefield(options);
-  const game=new Phaser.Game({type:Phaser.WEBGL,parent:options.parent,width:options.parent.clientWidth||1100,height:options.parent.clientHeight||650,backgroundColor:'#34483c',antialias:true,transparent:false,powerPreference:'high-performance',render:{roundPixels:false,antialias:true},scale:{mode:Phaser.Scale.RESIZE,autoCenter:Phaser.Scale.CENTER_BOTH},scene:[scene],input:{keyboard:true,mouse:true,touch:false},fps:{target:60,forceSetTimeOut:false},audio:{noAudio:true},banner:false});
+  const game=new Phaser.Game({type:Phaser.WEBGL,parent:options.parent,width:options.parent.clientWidth||1100,height:options.parent.clientHeight||650,backgroundColor:'#34483c',antialias:true,transparent:false,powerPreference:'high-performance',render:{roundPixels:false,antialias:true,antialiasGL:false},scale:{mode:Phaser.Scale.FIT,autoCenter:Phaser.Scale.CENTER_BOTH},scene:[scene],input:{keyboard:true,mouse:true,touch:false},fps:{target:60,forceSetTimeOut:false},audio:{noAudio:true},banner:false});
+  const observer=new ResizeObserver(()=>{if(scene.ready)scene.resize();});observer.observe(options.parent);
   let destroyed=false;
   return {
     setState(state){if(!destroyed)scene.acceptState(state);},
     setSelection(selection){scene.selection={units:[...selection.units],stronghold:selection.stronghold};},
     focus(x,y){if(!destroyed)scene.focus({x,y});},
     getViewport(){return destroyed?[]:scene.viewport();},
-    destroy(){if(destroyed)return;destroyed=true;options.parent.style.cursor='';delete options.parent.dataset.renderer;game.destroy(true);},
+    destroy(){if(destroyed)return;destroyed=true;observer.disconnect();options.parent.style.cursor='';delete options.parent.dataset.renderer;game.destroy(true);},
   };
 }
