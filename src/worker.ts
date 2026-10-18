@@ -6,7 +6,7 @@ let state: BattleState | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 const send = (message: WorkerOutput): void => self.postMessage(message);
 function stop(): void { if (timer !== null) clearInterval(timer); timer = null; }
-function snapshot(): void { if (state) send({ type: 'state', state }); }
+function snapshot(requestId?: number): void { if (state) send({ type: 'state', state, ...(requestId === undefined ? {} : { requestId }) }); }
 self.onmessage = (event: MessageEvent<WorkerInput>): void => {
   try {
     const message = event.data;
@@ -16,6 +16,7 @@ self.onmessage = (event: MessageEvent<WorkerInput>): void => {
       const mission = content.missions.find(m => m.id === message.missionId);
       if (!mission) throw new Error('Unknown mission.');
       state = message.restored ?? createBattle(mission, content, message.skills);
+      if (!message.restored && message.startPaused) state.paused = true;
       snapshot();
       // A fixed 100 ms step keeps rules deterministic and independent of rendering.
       timer = setInterval(() => {
@@ -30,7 +31,7 @@ self.onmessage = (event: MessageEvent<WorkerInput>): void => {
     } else if (message.type === 'command' && state) {
       applyCommand(state, message.command, content);
       snapshot();
-    } else if (message.type === 'snapshot') snapshot();
+    } else if (message.type === 'snapshot') snapshot(message.requestId);
   } catch (error) {
     send({ type: 'error', message: error instanceof Error ? error.message : String(error) });
   }

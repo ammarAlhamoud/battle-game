@@ -2,23 +2,26 @@ import { content, validateContent } from './content/index.js';
 import { mountUI } from './ui/index.js';
 import { buySkill, createCampaign, exportSave, finishMission, importSave, isMissionUnlocked, loadGame, respec, saveGame, validateSave } from './persistence/index.js';
 import { downloadAllEras, registerOffline } from './offline.js';
-import type { BattleState, Campaign, SaveData, WorkerInput, WorkerOutput } from './contracts.js';
+import { SimulationSession } from './lifecycle.js';
+import type { BattleState, Campaign, SaveData } from './contracts.js';
 import type { GameUI } from './ui-contract.js';
 
 const parent = document.querySelector<HTMLElement>('#app')!;
+type Phase = 'campaign' | 'starting' | 'battle' | 'leaving' | 'results' | 'importing';
+
 async function boot(): Promise<void> {
   const errors = validateContent(content);
   if (errors.length) throw new Error(`Content validation failed: ${errors.join('; ')}`);
   let campaign: Campaign = createCampaign();
   let battle: BattleState | null = null;
-  let worker: Worker | null = null;
-  let inBattle = false;
+  let session: SimulationSession | null = null;
+  let phase: Phase = 'campaign';
+  let epoch = 0;
   let resultHandled = false;
   let lastAutosave = 0;
   let saving: Promise<void> = Promise.resolve();
   let ui: GameUI;
   let recoveryMessage = '';
-  const snapshotListeners = new Set<(state: BattleState) => void>();
   try {
     const saved = await loadGame();
     if (saved) { const valid = validateSave(saved, content); campaign = valid.campaign; battle = valid.battle; }
@@ -26,67 +29,99 @@ async function boot(): Promise<void> {
     recoveryMessage = `Save could not be restored: ${error instanceof Error ? error.message : String(error)}. You can import a backup.`;
   }
   const saveData = (): SaveData => ({ version: 1, savedAt: Date.now(), campaign, battle });
-  const persist = (): Promise<void> => {
-    const snapshot = structuredClone(saveData());
+  const persistSnapshot = (data: SaveData): Promise<void> => {
+    const snapshot = structuredClone(data);
     saving = saving.catch(() => undefined).then(() => saveGame(snapshot));
     return saving;
   };
-  const send = (message: WorkerInput): void => worker?.postMessage(message);
-  const stopWorker = (): void => { if (worker) { send({ type: 'stop' }); worker.terminate(); worker = null; } };
-  const getLatest = async (): Promise<void> => {
-    if (!worker) return;
-    await new Promise<void>(resolve => {
-      const receive = (state: BattleState): void => { battle = state; clearTimeout(timeout); snapshotListeners.delete(receive); resolve(); };
-      const timeout = window.setTimeout(() => { snapshotListeners.delete(receive); resolve(); }, 1500);
-      snapshotListeners.add(receive);
-      send({ type: 'snapshot' });
-    });
+  const persist = (): Promise<void> => persistSnapshot(saveData());
+  const stopSession = (expected = session): void => {
+    if (!expected) return;
+    expected.close();
+    if (session === expected) session = null;
   };
+  const recover = (error: unknown, token: number, fallback: BattleState | null): void => {
+    if (epoch !== token) return;
+    stopSession();
+    const recoveryEpoch = ++epoch;
+    battle = fallback ? structuredClone(fallback) : null;
+    if (battle && !battle.ended) battle.paused = true;
+    phase = 'campaign';
+    ui.setCampaign(campaign, battle); ui.showCampaign();
+    ui.notify(`Simulation stopped: ${error instanceof Error ? error.message : String(error)}. Your last available battle snapshot was preserved.`);
+    void persist().catch(saveError => { if (epoch === recoveryEpoch) ui.notify(`Save failed: ${String(saveError)}`); });
+  };
+  const getLatest = async (expected = session, token = epoch): Promise<void> => {
+    if (!expected) return;
+    const latest = await expected.snapshot();
+    if (epoch !== token || (session !== expected && !latest.ended)) throw new Error('The battle changed while its snapshot was being requested. Please retry.');
+    battle = latest;
+  };
+  const transitionBusy = (): boolean => phase === 'starting' || phase === 'leaving' || phase === 'importing';
   ui = mountUI({
     parent, content, campaign, savedBattle: battle,
     onStart(missionId, resume) {
+      if (phase === 'battle' || transitionBusy()) return;
       if (!isMissionUnlocked(campaign, missionId, content)) { ui.notify('Complete the preceding battle to unlock this mission.'); return; }
+      const previousBattle = battle;
       const restored = resume && battle !== null && battle.missionId === missionId && !battle.ended ? structuredClone(battle) : undefined;
-      stopWorker();
-      inBattle = true; resultHandled = false;
-      ui.beginBattle(missionId);
-      worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-      worker.onerror = event => ui.notify(`Simulation error: ${event.message}`);
-      worker.onmessage = (event: MessageEvent<WorkerOutput>) => {
-        const message = event.data;
-        if (message.type === 'error') { ui.notify(message.message); return; }
-        battle = message.state;
-        for (const listener of snapshotListeners) listener(battle);
-        ui.setState(battle);
-        if (battle.ended && !resultHandled) {
-          resultHandled = true;
-          inBattle = false;
-          stopWorker();
-          const results = finishMission(campaign, battle, content);
-          ui.setCampaign(campaign, battle);
-          void persist().then(() => ui.showResults(results)).catch(error => { ui.notify(`Save failed: ${String(error)}`); ui.showResults(results); });
-        } else if (Date.now() - lastAutosave >= 5000) {
-          lastAutosave = Date.now();
-          void persist().catch(error => ui.notify(`Autosave failed: ${String(error)}`));
-        }
-      };
-      send({ type: 'init', missionId, skills: campaign.skills, restored });
+      stopSession();
+      const token = ++epoch;
+      phase = 'starting'; resultHandled = false; lastAutosave = 0;
+      battle = restored ?? null;
+      try {
+        ui.beginBattle(missionId);
+        const transport = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+        const created = new SimulationSession(transport, {
+          onState(state) {
+            if (epoch !== token || session !== created) return;
+            battle = state;
+            if (phase === 'starting') phase = 'battle';
+            ui.setState(state);
+            if (state.ended && !resultHandled) {
+              resultHandled = true;
+              const leaving = phase === 'leaving';
+              if (!leaving) phase = 'results';
+              stopSession(created);
+              const results = finishMission(campaign, state, content);
+              ui.setCampaign(campaign, battle);
+              void persist().then(() => { if (epoch === token && phase === 'results') ui.showResults(results); }).catch(error => {
+                if (epoch !== token || phase !== 'results') return;
+                ui.notify(`Save failed: ${String(error)}`); ui.showResults(results);
+              });
+            } else if (Date.now() - lastAutosave >= 5000) {
+              lastAutosave = Date.now();
+              void persist().catch(error => { if (epoch === token) ui.notify(`Autosave failed: ${String(error)}`); });
+            }
+          },
+          onError(error) { if (epoch === token && session === created) recover(error, token, created.lastState ?? restored ?? previousBattle); },
+        });
+        session = created;
+        created.initialize({ type: 'init', missionId, skills: campaign.skills, restored, startPaused: campaign.tutorial && !restored });
+      } catch (error) { recover(error, token, restored ?? previousBattle); }
     },
-    onCommand(command) { send({ type: 'command', command }); },
+    onCommand(command) { session?.command(command); },
     onBuySkill(id) {
+      if (transitionBusy() || phase === 'battle') return 'Finish the current battle or transition before purchasing skills.';
       if (battle && !battle.ended) return 'Finish the saved battle before purchasing skills. Its original army must remain consistent.';
-      const error = buySkill(campaign, id, content, inBattle);
+      const error = buySkill(campaign, id, content);
       if (!error) { ui.setCampaign(campaign, battle); void persist().catch(e => ui.notify(`Save failed: ${String(e)}`)); }
       return error;
     },
     onRespec() {
+      if (transitionBusy() || phase === 'battle') return 'Finish the current battle or transition before resetting skills.';
       if (battle && !battle.ended) return 'Finish the saved battle before resetting skills.';
-      const error = respec(campaign, content, inBattle);
-      if (!error) { ui.setCampaign(campaign, battle); void persist().catch(e => ui.notify(`Save failed: ${String(e)}`)); }
+      const error = respec(campaign, content);
+      // A completed army is historical: its old purchased-skill roster no longer
+      // describes the newly reset campaign. Results remain in campaign.records.
+      if (!error) { if (battle?.ended) battle = null; ui.setCampaign(campaign, battle); void persist().catch(e => ui.notify(`Save failed: ${String(e)}`)); }
       return error;
     },
     async onExport() {
+      if (phase === 'importing') throw new Error('Wait for the save import to finish.');
+      const token = epoch;
       await getLatest();
+      if (token !== epoch) throw new Error('The battle changed before export. Please retry.');
       const file = exportSave(saveData());
       const url = URL.createObjectURL(file);
       const link = document.createElement('a'); link.href = url; link.download = 'eightfold-save.json'; link.click();
@@ -95,34 +130,58 @@ async function boot(): Promise<void> {
     onLanguageChange(language) {
       campaign.language = language;
       ui.setCampaign(campaign, battle);
-      void persist().catch(error => ui.notify(`Save failed: ${String(error)}`));
+      if (phase !== 'importing') void persist().catch(error => ui.notify(`Save failed: ${String(error)}`));
     },
     async onImport(file) {
-      if (inBattle) throw new Error('Return to the campaign before importing a save.');
-      const imported = await importSave(file, content);
-      stopWorker();
-      campaign = imported.campaign; battle = imported.battle;
-      await persist();
-      ui.setCampaign(campaign, battle); ui.showCampaign(); ui.notify('Campaign and battle snapshot restored.');
+      if (phase !== 'campaign' && phase !== 'results') throw new Error('Return to the campaign before importing a save.');
+      phase = 'importing';
+      const token = ++epoch;
+      try {
+        const imported = await importSave(file, content);
+        // Publish the imported campaign only after its complete snapshot commits.
+        // A quota/permission failure leaves both the visible and live campaign intact.
+        await persistSnapshot({ ...imported, savedAt: Date.now() });
+        if (epoch !== token) return;
+        stopSession(); campaign = imported.campaign; battle = imported.battle;
+        phase = 'campaign'; ui.setCampaign(campaign, battle); ui.showCampaign(); ui.notify('Campaign and battle snapshot restored.');
+      } finally { if (epoch === token && phase === 'importing') phase = 'campaign'; }
     },
     onOffline: downloadAllEras,
-    async onSave() { await getLatest(); await persist(); ui.notify('Campaign and full battle snapshot saved.'); },
+    async onSave() {
+      if (phase === 'importing') throw new Error('Wait for the save import to finish.');
+      const token = epoch;
+      await getLatest();
+      if (token !== epoch) throw new Error('The battle changed before saving. Please retry.');
+      await persist();
+      if (token === epoch) ui.notify('Campaign and full battle snapshot saved.');
+    },
     onLeave() {
+      if (phase === 'leaving' || phase === 'importing') return;
+      const token = epoch, expected = session, fallback = battle;
+      phase = 'leaving';
       void (async () => {
-        if (worker && battle && !battle.ended) send({ type: 'command', command: { type: 'pause', value: true } });
-        await getLatest(); stopWorker(); inBattle = false;
-        await persist(); ui.setCampaign(campaign, battle); ui.showCampaign();
-      })().catch(error => { stopWorker(); inBattle = false; ui.showCampaign(); ui.notify(`Save failed: ${String(error)}`); });
+        if (expected?.ready) {
+          if (battle && !battle.ended) expected.command({ type: 'pause', value: true });
+          await getLatest(expected, token);
+        }
+        if (epoch !== token) return;
+        stopSession(expected);
+        if (battle && !battle.ended) battle.paused = true;
+        await persist();
+        if (epoch !== token) return;
+        phase = 'campaign'; ui.setCampaign(campaign, battle); ui.showCampaign();
+      })().catch(error => { if (epoch === token) recover(error, token, expected?.lastState ?? fallback); });
     },
   });
   if (recoveryMessage) ui.notify(recoveryMessage);
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && worker && battle && !battle.paused && !battle.ended) {
-      send({ type: 'command', command: { type: 'pause', value: true } });
-      void getLatest().then(persist).catch(() => undefined);
+    const expected = session, token = epoch;
+    if (document.hidden && expected?.ready && battle && !battle.paused && !battle.ended) {
+      expected.command({ type: 'pause', value: true });
+      void getLatest(expected, token).then(() => { if (epoch === token) return persist(); }).catch(() => undefined);
     }
   });
-  window.addEventListener('pagehide', () => { void persist(); });
+  window.addEventListener('pagehide', () => { if (phase !== 'importing') void persist().catch(() => undefined); });
   void registerOffline();
 }
 void boot().catch(error => {

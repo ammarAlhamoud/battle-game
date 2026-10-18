@@ -1,5 +1,6 @@
 import { arMessages } from './messages.js';
 import { arContent } from './content-ar.js';
+import { proMessagesAr } from './pro-messages.js';
 
 export type Language = 'en' | 'ar';
 let language: Language = 'en';
@@ -69,6 +70,7 @@ const rules: Rule[] = [
   [/^Save could not be restored: (.+)\. You can import a backup\.$/, (m, t) => `تعذر استعادة الحفظ: ${t(m[1]!)} يمكنك استيراد نسخة احتياطية.`],
   [/^Eightfold could not start: (.+)\. Reload or restore a valid save\.$/, (m, t) => `تعذر تشغيل EIGHTFOLD: ${t(m[1]!)} أعد التحميل أو استعد ملف حفظ صالحًا.`],
   [/^Content validation failed: (.+)$/, (m, t) => `تعذر التحقق من بيانات اللعبة: ${t(m[1]!)}`],
+  [/^Simulation stopped: (.+)\. Your last available battle snapshot was preserved\.$/, (m, t) => `توقفت المحاكاة: ${t(m[1]!)} حُفظت آخر حالة متاحة للمعركة.`],
   [/^Simulation error: (.+)$/, (m, t) => `خطأ في المحاكاة: ${t(m[1]!)}`],
   [/^Save failed: (.+)$/, (m, t) => `تعذر الحفظ: ${t(m[1]!)}`],
   [/^Autosave failed: (.+)$/, (m, t) => `تعذر الحفظ التلقائي: ${t(m[1]!)}`],
@@ -103,7 +105,7 @@ function readablePath(path: string): string {
 
 function arabic(source: string, depth: number): string {
   if (!source || depth > 12) return source;
-  const exact = arMessages[source] ?? arContent[source];
+  const exact = proMessagesAr[source] ?? arMessages[source] ?? arContent[source];
   if (exact !== undefined) return exact;
   const text = source.trim();
   if (text !== source) return source.slice(0, source.indexOf(text)) + arabic(text, depth + 1) + source.slice(source.indexOf(text) + text.length);
