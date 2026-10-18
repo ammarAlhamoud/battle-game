@@ -57,6 +57,7 @@ class Battlefield extends Phaser.Scene {
   private lastClickedUnit = '';
   private props: Phaser.GameObjects.Image[] = [];
   private structureSprites = new Map<string,Phaser.GameObjects.Image>();
+  private alphaMasks = new Map<string,{width:number;height:number;pixels:Uint8Array}>();
   private cameraMoved = false;
   private motionTime = 0;
   private fallen: Fallen[] = [];
@@ -72,10 +73,32 @@ class Battlefield extends Phaser.Scene {
   index(p: Vec): number {const x=Math.round(p.x),y=Math.round(p.y);return y<0||x<0||y>=this.heightCells||x>=this.widthCells?-1:y*this.widthCells+x;}
   visible(p: Vec): boolean {return !!this.current?.fog[0].visible[this.index(p)];}
   explored(p: Vec): boolean {return !!this.current?.fog[0].explored[this.index(p)];}
+  private artHit(image:Phaser.GameObjects.Image|Phaser.GameObjects.Sprite,point:Vec):boolean {
+    if(!image.visible||!image.getBounds().contains(point.x,point.y))return false;
+    const local=image.getWorldTransformMatrix().applyInverse(point.x,point.y);
+    let x=Math.floor(local.x+image.displayOriginX),y=Math.floor(local.y+image.displayOriginY);
+    if(image.flipX)x=image.width-1-x;if(image.flipY)y=image.height-1-y;
+    const key=`${image.texture.key}:${image.frame.name}`;
+    let mask=this.alphaMasks.get(key);
+    if(!mask){
+      const frame=image.frame,source=frame.source.image as HTMLCanvasElement;
+      const rgba=source.getContext('2d')!.getImageData(frame.cutX,frame.cutY,frame.cutWidth,frame.cutHeight).data;
+      const pixels=new Uint8Array(frame.cutWidth*frame.cutHeight);for(let i=0;i<pixels.length;i++)pixels[i]=rgba[i*4+3];
+      mask={width:frame.cutWidth,height:frame.cutHeight,pixels};this.alphaMasks.set(key,mask);
+    }
+    return x>=0&&y>=0&&x<mask.width&&y<mask.height&&mask.pixels[y*mask.width+x]>32;
+  }
+  private pickUnit(point:Vec,owner?:number):Presented|undefined {
+    let painted:Presented|undefined,nearest:Presented|undefined,depth=-Infinity,distance=17;
+    for(const unit of this.presented.values()){
+      if(owner!==undefined&&unit.unit.owner!==owner)continue;
+      if(this.artHit(unit.sprite,point)&&unit.sprite.depth>=depth){painted=unit;depth=unit.sprite.depth;}
+      const p=this.world(unit),d=Math.hypot(p.x-point.x,p.y-point.y);if(d<distance){nearest=unit;distance=d;}
+    }
+    return painted??nearest;
+  }
   fortHit(fort:Stronghold,point:Vec):boolean {
-    const image=this.forts.get(fort.id)?.image;if(!image||!image.getBounds().contains(point.x,point.y))return false;
-    const x=(point.x-image.x)/image.scaleX+image.originX*image.width,y=(point.y-image.y)/image.scaleY+image.originY*image.height;
-    return (this.textures.getPixelAlpha(Math.floor(x),Math.floor(y),'strongholds',image.frame.name)??0)>32;
+    const image=this.forts.get(fort.id)?.image;return !!image&&this.artHit(image,point);
   }
   create(): void {
     this.makeAtlases();this.makeTerrain();
@@ -109,13 +132,13 @@ class Battlefield extends Phaser.Scene {
   makeAtlases():void {
     const era=this.opts.mission.era;
     const units=document.createElement('canvas');units.width=8*UNIT;units.height=7*UNIT;
-    const ctx=units.getContext('2d')!;
+    const ctx=units.getContext('2d',{willReadFrequently:true})!;
     for(let role=0;role<7;role++)for(let side=0;side<2;side++)for(let frame=0;frame<4;frame++) {
       const n=(role*2+side)*4+frame;ctx.save();ctx.translate(n%8*UNIT,Math.floor(n/8)*UNIT);drawUnit(ctx,era,ROLES[role],side,frame);ctx.restore();
     }
     const atlas=this.textures.addCanvas('soldiers',units)!;
     for(let n=0;n<56;n++)atlas.add(n,0,n%8*UNIT,Math.floor(n/8)*UNIT,UNIT,UNIT);
-    const forts=document.createElement('canvas');forts.width=5*FORT;forts.height=FORT;const fctx=forts.getContext('2d')!;
+    const forts=document.createElement('canvas');forts.width=5*FORT;forts.height=FORT;const fctx=forts.getContext('2d',{willReadFrequently:true})!;
     for(let kind=0;kind<5;kind++) {
       fctx.save();fctx.translate(kind*FORT,0);if(kind===4)drawBarrier(fctx,era);else drawArchitecture(fctx,era,kind);fctx.restore();
     }
@@ -243,8 +266,8 @@ class Battlefield extends Phaser.Scene {
     if(this.drag?.middle&&p.isDown) {
       camera.scrollX=this.drag.camera.x-(p.x-this.drag.x)/camera.zoom;camera.scrollY=this.drag.camera.y-(p.y-this.drag.y)/camera.zoom;this.cameraMoved=true;return;
     }
-    this.hover=null;let closest=24;
-    for(const [id,v] of this.presented) {const wp=this.world({x:v.x,y:v.y});const d=Math.hypot(wp.x-this.pointerWorld.x,wp.y-27-this.pointerWorld.y);if(d<closest){closest=d;this.hover=id;}}
+    this.hover=this.pickUnit(this.pointerWorld)?.unit.id??null;
+    if(!this.hover)for(const fort of this.current?.strongholds??[])if(this.fortHit(fort,this.pointerWorld)){this.hover=fort.id;break;}
     this.opts.parent.style.cursor=this.drag&&!this.drag.middle?'crosshair':this.hover?'pointer':'default';
   }
   pointerUp(p:Phaser.Input.Pointer):void {
@@ -257,8 +280,7 @@ class Battlefield extends Phaser.Scene {
       for(const [id,v] of this.presented)if(v.unit.owner===0){const q=this.world(v);if(q.x>=x1&&q.x<=x2&&q.y>=y1&&q.y<=y2)selected.push(id);}
       this.opts.onSelect({units:selected,stronghold:null},additive);return;
     }
-    let closest=27,picked:Unit|null=null;
-    for(const v of this.presented.values())if(v.unit.owner===0) {const q=this.world(v);const d=Math.hypot(q.x-world.x,q.y-27-world.y);if(d<closest){closest=d;picked=v.unit;}}
+    const picked=this.pickUnit(world,0)?.unit??null;
     if(picked) {
       let units=[picked.id];
       if(this.time.now-this.lastClick<330&&this.lastClickedUnit===picked.id) {
@@ -269,15 +291,14 @@ class Battlefield extends Phaser.Scene {
       this.lastClick=this.time.now;this.lastClickedUnit=picked.id;
       this.opts.onSelect({units,stronghold:null},additive);return;
     }
-    let fort:Stronghold|null=null;closest=58;
+    let fort:Stronghold|null=null,closest=58;
     for(const s of this.current?.strongholds??[])if(s.owner===0||this.explored(s)){const q=this.world(s),d=Math.hypot(q.x-world.x,(q.y-15-world.y)*1.3);if(d<closest||this.fortHit(s,world)){closest=d;fort=s;}}
     this.opts.onSelect({units:[],stronghold:fort?.id??null},additive);
   }
   orderAt(cell:Vec,append:boolean):void {
-    if(!this.current)return;const p=this.world(cell);let closest=27,enemy:Unit|null=null;
-    for(const v of this.presented.values())if(v.unit.owner===1){const q=this.world(v);const d=Math.hypot(p.x-q.x,p.y-q.y+10);if(d<closest){closest=d;enemy=v.unit;}}
+    if(!this.current)return;const p=this.world(cell),enemy=this.pickUnit(p,1)?.unit??null;
     if(enemy){this.opts.onOrder({kind:'attack',x:enemy.x,y:enemy.y,target:enemy.id},append);return;}
-    let fort:Stronghold|null=null;closest=45;
+    let fort:Stronghold|null=null,closest=45;
     for(const s of this.current.strongholds)if(s.owner===0||this.visible(s)){const q=this.world(s),d=Math.hypot(q.x-p.x,q.y-p.y);if(d<closest||this.fortHit(s,p)){closest=d;fort=s;}}
     if(fort){this.opts.onOrder({kind:fort.owner===0?'defend':'capture',x:fort.x,y:fort.y,target:fort.id},append);return;}
     const x=clamp(cell.x,0,this.widthCells-1),y=clamp(cell.y,0,this.heightCells-1);this.opts.onOrder({kind:'move',x,y},append);
