@@ -54,9 +54,11 @@ def soldier(x,y,era,role='frontline',color='#54b6a0',scale=1):
     if era==0:s+=poly([(-5,-29),(-4,-33),(3,-32),(5,-28)],'#675f46')
     elif era<4:s+=poly([(-5,-26),(-5,-32),(2,-35),(6,-29),(5,-25)],'#d0cfac')+line(0,-34,4,-38,color,3)
     else:s+=poly([(-6,-27),(-4,-33),(3,-34),(7,-28)],'#658271')+line(1,-28,6,-28,'#c8ddbe',2)
-    if role=='ranged' and era<4:s+=f'<path d="M11 -32Q28 -19 11 -5Z" fill="none" stroke="#b4a173" stroke-width="2"/>'+line(6,-18,25,-21,'#ddd0a8',1.5)
+    if role=='ranged' and era==0:s+=line(8,-18,13,-33,'#d6c79e',1.5)+line(13,-33,22,-23,'#d6c79e',1.5)+ellipse(22,-23,2,3,'#b4bb98')
+    elif role=='ranged' and era==2:s+=line(7,-18,31,-35,'#b5a477',2)+poly([(28,-36),(36,-40),(32,-32)],'#dde0bc')
+    elif role=='ranged' and era<4:s+=f'<path d="M11 -32Q28 -19 11 -5Z" fill="none" stroke="#b4a173" stroke-width="2"/>'+line(6,-18,25,-21,'#ddd0a8',1.5)
     elif role=='guard':s+=poly([(-13,-25),(-4,-24),(-2,-10),(-10,-6),(-15,-12)],color,'#315e4e')
-    elif era<4:s+=line(11,0,12,-40,'#8f825c',2)+poly([(9,-39),(13,-46),(16,-39)],'#d5d3ae')
+    elif era<4 or era==4:s+=line(11,0,12,-40,'#8f825c',2)+poly([(9,-39),(13,-46),(16,-39)],'#d5d3ae')
     else:s+=line(7,-18,25,-23,'#405e4e',4)+line(11,-18,15,-11,'#405e4e',3)
     return s+'</g>'
 
