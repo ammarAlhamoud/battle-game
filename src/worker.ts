@@ -15,7 +15,7 @@ self.onmessage = (event: MessageEvent<WorkerInput>): void => {
       stop();
       const mission = content.missions.find(m => m.id === message.missionId);
       if (!mission) throw new Error('Unknown mission.');
-      state = message.restored ?? createBattle(mission, content, message.skills);
+      state = message.restored ?? createBattle(mission, content, message.skills, [1], message.difficulty ?? 'relaxed');
       if (!message.restored && message.startPaused) state.paused = true;
       snapshot();
       // A fixed 100 ms step keeps rules deterministic and independent of rendering.

@@ -1,4 +1,5 @@
 import { content, validateContent } from './content/index.js';
+import { applyCommand } from './sim/engine.js';
 import { mountUI } from './ui/index.js';
 import { buySkill, createCampaign, exportSave, finishMission, importSave, isMissionUnlocked, loadGame, respec, saveGame, validateSave } from './persistence/index.js';
 import { downloadAllEras, registerOffline } from './offline.js';
@@ -28,6 +29,11 @@ async function boot(): Promise<void> {
   } catch (error) {
     recoveryMessage = `Save could not be restored: ${error instanceof Error ? error.message : String(error)}. You can import a backup.`;
   }
+  const legacyDifficulty = (savedCampaign: Campaign, savedBattle: BattleState | null): void => {
+    savedCampaign.difficulty ??= 'veteran';
+    if (savedBattle) { savedBattle.difficulty ??= 'veteran'; savedBattle.aiGraceUntil ??= 0; }
+  };
+  legacyDifficulty(campaign, battle);
   const saveData = (): SaveData => ({ version: 1, savedAt: Date.now(), campaign, battle });
   const persistSnapshot = (data: SaveData): Promise<void> => {
     const snapshot = structuredClone(data);
@@ -97,7 +103,7 @@ async function boot(): Promise<void> {
           onError(error) { if (epoch === token && session === created) recover(error, token, created.lastState ?? restored ?? previousBattle); },
         });
         session = created;
-        created.initialize({ type: 'init', missionId, skills: campaign.skills, restored, startPaused: campaign.tutorial && !restored });
+        created.initialize({ type: 'init', missionId, skills: campaign.skills, restored, startPaused: campaign.tutorial && !restored, difficulty: campaign.difficulty ?? 'relaxed' });
       } catch (error) { recover(error, token, restored ?? previousBattle); }
     },
     onCommand(command) { if (phase === 'battle') session?.command(command); },
@@ -132,12 +138,25 @@ async function boot(): Promise<void> {
       ui.setCampaign(campaign, battle);
       if (phase !== 'importing') void persist().catch(error => ui.notify(`Save failed: ${String(error)}`));
     },
+    async onDifficultyChange(difficulty) {
+      if (transitionBusy()) throw new Error('Wait for the current transition before changing difficulty.');
+      const token = epoch, expected = session;
+      if (phase === 'battle' && expected?.ready) {
+        expected.command({ type: 'difficulty', value: difficulty });
+        await getLatest(expected, token);
+      } else if (battle && !battle.ended) applyCommand(battle, { type: 'difficulty', value: difficulty }, content);
+      if (epoch !== token) throw new Error('The battle changed before difficulty was saved. Please retry.');
+      campaign.difficulty = difficulty;
+      ui.setCampaign(campaign, battle);
+      await persist();
+    },
     async onImport(file) {
       if (phase !== 'campaign' && phase !== 'results') throw new Error('Return to the campaign before importing a save.');
       phase = 'importing';
       const token = ++epoch;
       try {
         const imported = await importSave(file, content);
+        legacyDifficulty(imported.campaign, imported.battle);
         // Publish the imported campaign only after its complete snapshot commits.
         // A quota/permission failure leaves both the visible and live campaign intact.
         await persistSnapshot({ ...imported, savedAt: Date.now() });

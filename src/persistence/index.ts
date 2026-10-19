@@ -11,7 +11,7 @@ const DB_VERSION = 1;
 const STORE = 'snapshots';
 
 export function createCampaign(): Campaign {
-  return { version: 1, records: {}, points: INITIAL_POINTS, skills: [], selectedEra: 0, tutorial: true, totalEarned: INITIAL_POINTS, language: 'en' };
+  return { version: 1, records: {}, points: INITIAL_POINTS, skills: [], selectedEra: 0, tutorial: true, totalEarned: INITIAL_POINTS, language: 'en', difficulty: 'relaxed' };
 }
 
 export function isMissionUnlocked(campaign: Campaign, missionId: string, data: GameContent): boolean {
@@ -140,7 +140,7 @@ export function validateSave(value: unknown, data: GameContent): SaveData {
   const root = obj(value, 'save', ['version', 'savedAt', 'campaign', 'battle']);
   choice(root.version, [1], 'version');
   int(root.savedAt, 'savedAt', 0, 8.64e15);
-  const campaign = obj(root.campaign, 'campaign', ['version', 'records', 'points', 'skills', 'selectedEra', 'tutorial', 'totalEarned', 'language']);
+  const campaign = obj(root.campaign, 'campaign', ['version', 'records', 'points', 'skills', 'selectedEra', 'tutorial', 'totalEarned', 'language', 'difficulty']);
   choice(campaign.version, [1], 'campaign.version');
   const missions = new Map(data.missions.map(m => [m.id, m]));
   const skillDefs = new Map(data.skills.map(s => [s.id, s]));
@@ -150,6 +150,7 @@ export function validateSave(value: unknown, data: GameContent): SaveData {
   int(campaign.selectedEra, 'campaign.selectedEra', 0, data.eras.length - 1);
   bool(campaign.tutorial, 'campaign.tutorial');
   if (campaign.language !== undefined) choice(campaign.language, ['en', 'ar'], 'campaign.language');
+  if (campaign.difficulty !== undefined) choice(campaign.difficulty, ['relaxed', 'standard', 'veteran'], 'campaign.difficulty');
   let rewardCount = 0;
   const records = dictionary(campaign.records, 'campaign.records', (v, path, id) => {
     const mission = missions.get(id);
@@ -185,7 +186,7 @@ export function validateSave(value: unknown, data: GameContent): SaveData {
 }
 
 function validateBattle(value: unknown, data: GameContent, campaign: Campaign): void {
-  const b = obj(value, 'battle', ['version', 'missionId', 'seed', 'tick', 'time', 'paused', 'units', 'factions', 'strongholds', 'structures', 'fog', 'ai', 'events', 'nextId', 'winner', 'ended', 'aiSides']);
+  const b = obj(value, 'battle', ['version', 'missionId', 'seed', 'tick', 'time', 'paused', 'units', 'factions', 'strongholds', 'structures', 'fog', 'ai', 'events', 'nextId', 'winner', 'ended', 'aiSides', 'difficulty', 'aiGraceUntil']);
   choice(b.version, [1], 'battle.version');
   const missionId = str(b.missionId, 'battle.missionId');
   const mission = data.missions.find(m => m.id === missionId);
@@ -199,6 +200,8 @@ function validateBattle(value: unknown, data: GameContent, campaign: Campaign): 
   const holdIds = new Set(mission.strongholds.map(h => h.id));
   const tick = int(b.tick, 'battle.tick', 0, 1e9);
   const time = num(b.time, 'battle.time', 0, 1e8);
+  if (b.difficulty !== undefined) choice(b.difficulty, ['relaxed', 'standard', 'veteran'], 'battle.difficulty');
+  if (b.aiGraceUntil !== undefined) num(b.aiGraceUntil, 'battle.aiGraceUntil', 0, time + 90);
   int(b.seed, 'battle.seed', 0, 0xffffffff);
   if (b.seed !== mission.seed) fail('battle.seed', 'seed differs from the authored mission');
   bool(b.paused, 'battle.paused');
@@ -334,8 +337,9 @@ function validateBattle(value: unknown, data: GameContent, campaign: Campaign): 
   const ai = list(b.ai, 'battle.ai', 2);
   if (ai.length !== 2) fail('battle.ai', 'expected both faction plans');
   ai.forEach((value, i) => {
-    const path = `battle.ai[${i}]`; const a = obj(value, path, ['nextDecision', 'objective', 'mode', 'lastKnown', 'decisions']);
+    const path = `battle.ai[${i}]`; const a = obj(value, path, ['nextDecision', 'objective', 'mode', 'lastKnown', 'decisions', 'nextRecruitAt']);
     num(a.nextDecision, `${path}.nextDecision`, 0, 1e12);
+    if (a.nextRecruitAt !== undefined) num(a.nextRecruitAt, `${path}.nextRecruitAt`, 0, 1e12);
     if (a.objective !== null && !holdIds.has(str(a.objective, `${path}.objective`))) fail(path, 'unknown strategic objective');
     choice(a.mode, ['defend', 'expand', 'attack', 'recover'], `${path}.mode`);
     memories(a.lastKnown, `${path}.lastKnown`); int(a.decisions, `${path}.decisions`, 0, 1e9);

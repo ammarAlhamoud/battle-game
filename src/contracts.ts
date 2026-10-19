@@ -1,5 +1,6 @@
 /** Shared, JSON-serializable contracts. Coordinates use map cells, not screen pixels. */
 export type Side = 0 | 1;
+export type Difficulty = 'relaxed' | 'standard' | 'veteran';
 export type Role = 'frontline' | 'ranged' | 'guard' | 'scout' | 'stealth' | 'siege' | 'engineer';
 export type Formation = 'line' | 'column' | 'wedge' | 'spread' | 'shield';
 export type Terrain = '.' | 'f' | '^' | '~' | '=' | '#' | 'g' | 'c';
@@ -55,6 +56,7 @@ export interface Structure extends Vec { id: string; owner: Side; hp: number; ma
 export interface Memory extends Vec { id: string; defId: string; seen: number }
 export interface Fog { visible: boolean[]; explored: boolean[]; memory: Record<string, Memory> }
 export interface AIPlan {
+  nextRecruitAt?: number;
   nextDecision: number; objective: string | null; mode: 'defend' | 'expand' | 'attack' | 'recover';
   lastKnown: Record<string, Memory>; decisions: number;
 }
@@ -63,6 +65,7 @@ export interface GameEvent extends Vec {
   owner: Side; text?: string; target?: Vec;
 }
 export interface BattleState {
+  difficulty?: Difficulty; aiGraceUntil?: number;
   version: 1; missionId: string; seed: number; tick: number; time: number; paused: boolean;
   units: Unit[]; factions: [Faction, Faction]; strongholds: Stronghold[]; structures: Structure[];
   fog: [Fog, Fog]; ai: [AIPlan, AIPlan]; events: GameEvent[]; nextId: number;
@@ -70,6 +73,7 @@ export interface BattleState {
 }
 export type Command =
   | { type: 'pause'; value: boolean }
+  | { type: 'difficulty'; value: Difficulty }
   | { type: 'surrender'; side: Side }
   | { type: 'order'; side: Side; ids: string[]; order: Order; append?: boolean }
   | { type: 'editOrders'; side: Side; ids: string[]; orders: Order[] }
@@ -85,17 +89,19 @@ export type Command =
 export interface ProgressRecord { bestScore: number; claimed: number[]; victory: boolean }
 export interface Campaign {
   language?: 'en' | 'ar';
+  difficulty?: Difficulty;
   version: 1; records: Record<string, ProgressRecord>; points: number; skills: string[];
   selectedEra: number; tutorial: boolean; totalEarned: number;
 }
 export interface SaveData { version: 1; savedAt: number; campaign: Campaign; battle: BattleState | null }
 export interface ObservedState {
+  difficulty?: Difficulty; aiGraceUntil?: number;
   side: Side; time: number; tick: number; own: Unit[]; enemies: Unit[];
   strongholds: Stronghold[]; faction: Faction; enemyMemory: Record<string, Memory>;
   structures: Structure[]; map: string[]; mission: MissionDef; plan: AIPlan;
 }
 export type WorkerInput =
-  | { type: 'init'; missionId: string; skills: string[]; restored?: BattleState; startPaused?: boolean }
+  | { type: 'init'; missionId: string; skills: string[]; restored?: BattleState; startPaused?: boolean; difficulty?: Difficulty }
   | { type: 'command'; command: Command }
   | { type: 'stop' }
   | { type: 'snapshot'; requestId?: number };

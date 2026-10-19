@@ -1,4 +1,4 @@
-import type { BattleState, Campaign, Command, GameContent } from './contracts';
+import type { BattleState, Campaign, Command, Difficulty, GameContent } from './contracts';
 
 export interface ResultsData { victory: boolean; score: number; reward: number; missionId: string }
 export interface UIOptions {
@@ -11,6 +11,7 @@ export interface UIOptions {
   onBuySkill(id: string): string | null;
   onRespec(): string | null;
   onLanguageChange(language: 'en' | 'ar'): void;
+  onDifficultyChange?(difficulty: Difficulty): Promise<void>;
   onExport(): Promise<void>;
   onImport(file: File): Promise<void>;
   onOffline(progress: (value: number) => void): Promise<void>;

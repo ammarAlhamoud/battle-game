@@ -1,5 +1,6 @@
 import type { AIPlan, Command, Formation, GameContent, Memory, ObservedState, Order, Role, Stronghold, Unit, UnitDef, Vec } from '../contracts.js';
 import { findPath, isWalkable, terrainAt } from './navigation.js';
+import { difficultyProfile } from './difficulty.js';
 
 const distance = (a: Vec, b: Vec): number => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -11,6 +12,10 @@ interface Objective { target: Stronghold; mode: AIPlan['mode']; utility: number 
  */
 export function decideAI(observation: ObservedState, content: GameContent): Command[] {
   const o = observation, commands: Command[] = [], defs = content.eras[o.mission.era]!.units;
+  // Only the computer opponent is eased. Guard optional access for legacy observations.
+  const profile = difficultyProfile(o.side === 1 && 'difficulty' in o ? o.difficulty : undefined);
+  const eased = profile.armyCapacityRatio < 1;
+  const preparing = o.side === 1 && 'aiGraceUntil' in o && (o.aiGraceUntil ?? 0) > o.time;
   const byId = new Map(defs.map(d => [d.id, d]));
   const ownMain = o.strongholds.find(s => s.kind === 'main' && s.owner === o.side);
   const enemyMain = o.strongholds.find(s => s.kind === 'main' && s.owner !== o.side);
@@ -40,6 +45,7 @@ export function decideAI(observation: ObservedState, content: GameContent): Comm
   for (const [id, m] of Object.entries(o.enemyMemory)) if (o.time - m.seen <= 90) memory[id] = { ...m };
   o.plan.lastKnown = memory;
   const candidates: Objective[] = [];
+  if (preparing) candidates.push({ target: ownMain, mode: 'defend', utility: Infinity });
   if (homeThreat > 0 || ownMain.capturing !== null) {
     candidates.push({ target: ownMain, mode: 'defend', utility: 1.15 + o.mission.ai.defense * .35 + homeThreat / Math.max(35, ownPower) });
   }
@@ -69,7 +75,7 @@ export function decideAI(observation: ObservedState, content: GameContent): Comm
   const objective = candidates[0]!;
   const changed = o.plan.objective !== objective.target.id || o.plan.mode !== objective.mode;
   o.plan.objective = objective.target.id; o.plan.mode = objective.mode;
-  o.plan.decisions++; o.plan.nextDecision = o.time + 1;
+  o.plan.decisions++; o.plan.nextDecision = o.time + profile.reactionSeconds;
 
   // Economy considers pending jobs and reserves, then emits exactly the same commands used by the player.
   let budget = o.faction.resources;
@@ -104,16 +110,23 @@ export function decideAI(observation: ObservedState, content: GameContent): Comm
   const queued = o.faction.lines.reduce((n, l) => n + l.queue.length, 0);
   const deployedCapacity = o.own.reduce((n, u) => n + (byId.get(u.defId)?.capacity ?? 1), 0);
   const capacity = o.faction.baseCapacity + effectValue('capacity') + o.strongholds.reduce((n, s) => n + (s.owner === o.side && s.kind !== 'main' ? s.capacity : 0), 0);
+  let projectedCapacity = deployedCapacity
+    + o.faction.reserves.reduce((n, reserve) => n + (byId.get(reserve.unitId)?.capacity ?? 0), 0)
+    + o.faction.lines.reduce((n, line) => n + line.queue.reduce((total, job) => total + (byId.get(job.unitId)?.capacity ?? 0), 0), 0);
+  const startingCapacity = o.mission.starting[o.side].reduce((n, role) => n + (defs.find(def => def.role === role)?.capacity ?? 1), 0);
+  const preferredCapacity = Math.min(capacity, Math.max(startingCapacity, Math.floor(capacity * profile.armyCapacityRatio)));
   const reserveRoom = o.faction.reserveCapacity - o.faction.reserves.length;
   // Avoid turning the entire finite treasury into unusable blocked training queues.
-  if (deployedCapacity < capacity || reserveRoom > queued) {
+  if ((!eased || o.time + 1e-8 >= (o.plan.nextRecruitAt ?? 0)) && (deployedCapacity < capacity || reserveRoom > queued)) {
     for (let lineIndex = 0; lineIndex < o.faction.lines.length; lineIndex++) {
       const line = o.faction.lines[lineIndex]!;
       if (line.blocked || line.queue.length >= 2) continue;
-      const recruit = available.filter(d => d.cost <= budget).sort((a, b) => scoreRecruit(b) - scoreRecruit(a) || a.id.localeCompare(b.id))[0];
+      const recruit = available.filter(d => d.cost <= budget && (!eased || projectedCapacity + d.capacity <= preferredCapacity && projectedCapacity + d.capacity <= capacity))
+        .sort((a, b) => scoreRecruit(b) - scoreRecruit(a) || a.id.localeCompare(b.id))[0];
       if (!recruit) break;
       commands.push({ type: 'recruit', side: o.side, unitId: recruit.id, line: lineIndex });
       budget -= recruit.cost; addRole(recruit.id);
+      if (eased) { projectedCapacity += recruit.capacity; o.plan.nextRecruitAt = o.time + profile.recruitSeconds; break; }
     }
   }
 
@@ -144,7 +157,7 @@ export function decideAI(observation: ObservedState, content: GameContent): Comm
   };
 
   // Scouting is assigned to a small detachment; most troops retain a coherent capture objective.
-  if (homeThreat === 0 && eligible.length >= 5) {
+  if (!preparing && profile.scouting && homeThreat === 0 && eligible.length >= 5) {
     const scouts = eligible.filter(u => byId.get(u.defId)?.role === 'scout').slice(0, Math.max(1, Math.floor(eligible.length / 8)));
     const scoutTarget = o.strongholds.filter(s => s.owner !== o.side && s.kind !== 'main' && s.id !== objective.target.id)
       .sort((a, b) => distance(objectiveOrigin, a) - distance(objectiveOrigin, b) || a.id.localeCompare(b.id))[0];
@@ -157,10 +170,10 @@ export function decideAI(observation: ObservedState, content: GameContent): Comm
   }
 
   // Engineers build only when the treasury can afford it after recruitment; structures cannot seal a one-cell bridge.
-  for (const unit of eligible) if (byId.get(unit.defId)?.role === 'engineer' && unit.orders[0]?.kind === 'build') assigned.add(unit.id);
+  if (!preparing && profile.construction) for (const unit of eligible) if (byId.get(unit.defId)?.role === 'engineer' && unit.orders[0]?.kind === 'build') assigned.add(unit.id);
   const engineers = eligible.filter(u => byId.get(u.defId)?.role === 'engineer' && !assigned.has(u.id));
   const maxStructures = objective.mode === 'defend' ? 3 : 2;
-  if (hasEffect('engineer') && engineers.length && budget >= 65 && o.structures.filter(s => s.owner === o.side).length < maxStructures) {
+  if (!preparing && profile.construction && hasEffect('engineer') && engineers.length && budget >= 65 && o.structures.filter(s => s.owner === o.side).length < maxStructures) {
     const anchor = objective.mode === 'defend' ? ownMain : o.strongholds.filter(s => s.owner === o.side && s.kind !== 'main')
       .sort((a, b) => distance(a, enemyMain) - distance(b, enemyMain))[0];
     if (anchor) {
@@ -177,7 +190,7 @@ export function decideAI(observation: ObservedState, content: GameContent): Comm
   }
 
   // A flanking element responds to an observed ranged concentration; it never obtains hidden positions.
-  if (objective.mode === 'attack' && eligible.length >= 7 && enemyRanged > 0) {
+  if (!preparing && profile.flanking && objective.mode === 'attack' && eligible.length >= 7 && enemyRanged > 0) {
     const flankers = eligible.filter(u => !assigned.has(u.id) && ['stealth', 'scout'].includes(byId.get(u.defId)?.role ?? '')).slice(0, 3);
     const visibleRanged = o.enemies.filter(e => ['ranged', 'siege'].includes(byId.get(e.defId)?.role ?? ''))
       .sort((a, b) => distance(a, objective.target) - distance(b, objective.target) || a.id.localeCompare(b.id))[0];
@@ -194,26 +207,36 @@ export function decideAI(observation: ObservedState, content: GameContent): Comm
     }
   }
   const army = eligible.filter(u => !assigned.has(u.id));
-  issue(army, { kind: objective.mode === 'defend' || objective.mode === 'recover' ? 'defend' : 'capture', x: objective.target.x, y: objective.target.y, target: objective.target.id }, formation);
+  if (preparing) {
+    const defend: Order = { kind: 'defend', x: ownMain.x, y: ownMain.y, target: ownMain.id };
+    for (const unit of army) {
+      if (distance(unit, ownMain) > 3) {
+        const first = unit.orders[0], last = unit.orders.at(-1);
+        if (first?.kind !== 'move' || distance(first, ownMain) > .1 || last?.kind !== 'defend' || last.target !== ownMain.id) {
+          commands.push({ type: 'editOrders', side: o.side, ids: [unit.id], orders: [{ kind: 'move', x: ownMain.x, y: ownMain.y }, { ...defend }] });
+        }
+      } else issue([unit], defend, 'line');
+    }
+  } else issue(army, { kind: objective.mode === 'defend' || objective.mode === 'recover' ? 'defend' : 'capture', x: objective.target.x, y: objective.target.y, target: objective.target.id }, formation);
 
   // Tactical abilities use legal visible targets, finite costs, and the faction's actual cooldown ledger.
   const cooldownReady = (name: string): boolean => (o.faction.cooldowns[name] ?? 0) <= 0;
   const wounded = eligible.filter(u => u.hp < (byId.get(u.defId)?.hp ?? u.hp) * .68);
-  if (hasEffect('rally') && wounded.length >= 2 && budget >= 30 && cooldownReady('rally')) {
+  if (!preparing && profile.globalAbilities && hasEffect('rally') && wounded.length >= 2 && budget >= 30 && cooldownReady('rally')) {
     const center = wounded.reduce((best, u) => wounded.filter(n => distance(n, u) < 3).length > wounded.filter(n => distance(n, best) < 3).length ? u : best);
     commands.push({ type: 'ability', side: o.side, ability: 'rally', x: center.x, y: center.y }); budget -= 30;
   }
-  if (hasEffect('volley') && budget >= 45 && cooldownReady('volley') && o.enemies.length >= 3) {
+  if (!preparing && profile.globalAbilities && hasEffect('volley') && budget >= 45 && cooldownReady('volley') && o.enemies.length >= 3) {
     const target = [...o.enemies].sort((a, b) => o.enemies.filter(n => distance(n, b) < 2.4).length - o.enemies.filter(n => distance(n, a) < 2.4).length || a.id.localeCompare(b.id))[0]!;
     if (o.enemies.filter(n => distance(n, target) < 2.4).length >= 3) {
       commands.push({ type: 'ability', side: o.side, ability: 'volley', x: target.x, y: target.y }); budget -= 45;
     }
   }
-  if (hasEffect('recon') && budget >= 25 && cooldownReady('recon') && o.enemies.length === 0 && objective.mode === 'attack') {
+  if (!preparing && profile.globalAbilities && hasEffect('recon') && budget >= 25 && cooldownReady('recon') && o.enemies.length === 0 && objective.mode === 'attack') {
     commands.push({ type: 'ability', side: o.side, ability: 'recon', x: objective.target.x, y: objective.target.y }); budget -= 25;
   }
   const activated = eligible.filter(u => u.abilityCooldown <= 0 && o.enemies.some(e => distance(e, u) <= Math.max(3, byId.get(u.defId)?.range ?? 1)));
-  const count = Math.min(activated.length, Math.floor(budget / 4));
+  const count = preparing ? 0 : Math.min(activated.length, Math.floor(budget / 4), profile.unitAbilitiesPerDecision);
   if (count) commands.push({ type: 'unitAbility', side: o.side, ids: activated.slice(0, count).map(u => u.id) });
   return commands;
 }

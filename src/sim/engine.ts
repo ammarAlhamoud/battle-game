@@ -1,5 +1,6 @@
-import type { BattleState, Command, Faction, Formation, GameContent, GameEvent, MissionDef, Order, Side, Stronghold, Structure, Unit, UnitDef, Vec } from '../contracts.js';
+import type { BattleState, Command, Difficulty, Faction, Formation, GameContent, GameEvent, MissionDef, Order, Side, Stronghold, Structure, Unit, UnitDef, Vec } from '../contracts.js';
 import { decideAI } from './ai.js';
+import { difficultyProfile } from './difficulty.js';
 import { findPath, formationModifiers, formationOffset, isNarrow, isWalkable, localAvoidance, terrainAt, terrainModifiers } from './navigation.js';
 
 /** All authoritative mechanics use cell coordinates and seconds. No wall clock or Math.random. */
@@ -74,10 +75,10 @@ function spawn(state: BattleState, side: Side, def: UnitDef, content: GameConten
   if (!initial) emit(state, { kind: 'deploy', owner: side, x: unit.x, y: unit.y, text: def.name });
   return unit;
 }
-export function createBattle(mission: MissionDef, content: GameContent, skills: string[] = [], aiSides: Side[] = [1]): BattleState {
+export function createBattle(mission: MissionDef, content: GameContent, skills: string[] = [], aiSides: Side[] = [1], difficulty: Difficulty = 'veteran'): BattleState {
   const width = mission.map[0]?.length ?? 0, cells = width * mission.map.length;
   const knownSkills = skills.filter(id => content.skills.some(s => s.id === id));
-  const state: BattleState = { version: 1, missionId: mission.id, seed: mission.seed, tick: 0, time: 0, paused: false,
+  const state: BattleState = { difficulty, aiGraceUntil: difficultyProfile(difficulty).preparationSeconds, version: 1, missionId: mission.id, seed: mission.seed, tick: 0, time: 0, paused: false,
     units: [], factions: [faction(mission.resources[0], mission, knownSkills), faction(mission.resources[1], mission, knownSkills)],
     strongholds: mission.strongholds.map(s => ({ ...s, progress: 0, capturing: null })), structures: [],
     fog: [0, 1].map(() => ({ visible: Array<boolean>(cells).fill(false), explored: Array<boolean>(cells).fill(false), memory: {} })) as BattleState['fog'],
@@ -175,6 +176,23 @@ function validPoint(mission: MissionDef, p: Vec): boolean { return Number.isFini
 export function applyCommand(state: BattleState, command: Command, content: GameContent): void {
   if (command.type === 'pause') { if (!state.ended) state.paused = command.value; return; }
   if (state.ended) return;
+  if (command.type === 'difficulty') {
+    if (!['relaxed', 'standard', 'veteran'].includes(command.value)) return;
+    const previous = state.difficulty ?? 'veteran';
+    state.difficulty = command.value;
+    if (previous === command.value) { state.aiGraceUntil ??= 0; return; }
+    const rank: Record<Difficulty, number> = { relaxed: 0, standard: 1, veteran: 2 };
+    state.aiGraceUntil = state.time + (rank[command.value] < rank[previous] ? difficultyProfile(command.value).livePreparationSeconds : 0);
+    const plan = state.ai[1]; plan.nextDecision = state.time; plan.objective = null; plan.mode = 'defend'; delete plan.nextRecruitAt;
+    const home = main(state, 1);
+    for (const unit of state.units) if (unit.owner === 1) {
+      unit.route = []; delete unit.targetId;
+      const defend: Order | null = home ? { kind: 'defend', x: home.x, y: home.y, target: home.id } : null;
+      unit.orders = defend && state.aiGraceUntil > state.time ? distance(unit, home!) > 3
+        ? [{ kind: 'move', x: home!.x, y: home!.y }, defend] : [defend] : [];
+    }
+    return;
+  }
   const side = command.side, f = state.factions[side]; if (!f) return;
   const selected = 'ids' in command ? state.units.filter(u => u.owner === side && u.hp > 0 && command.ids.includes(u.id)) : [];
   switch (command.type) {
@@ -445,7 +463,7 @@ function runAI(state: BattleState, side: Side, content: GameContent): void {
   const plan = state.ai[side]; if (state.time + .00001 < plan.nextDecision) return;
   const mission = missionOf(state, content), width = mission.map[0]!.length;
   // Deep copy the complete observation. AI cannot read authoritative hidden objects or mutate state except its own serializable plan.
-  const observation = JSON.parse(JSON.stringify({ side, time: state.time, tick: state.tick,
+  const observation = JSON.parse(JSON.stringify({ side, time: state.time, tick: state.tick, difficulty: side === 1 ? state.difficulty ?? 'veteran' : 'veteran', aiGraceUntil: side === 1 ? state.aiGraceUntil ?? 0 : 0,
     own: state.units.filter(u => u.owner === side), enemies: state.units.filter(u => u.owner !== side && unitVisible(state, u, side, content)),
     strongholds: state.strongholds.map(s => {
       if (state.fog[side].visible[Math.round(s.y) * width + Math.round(s.x)] || s.owner === side) return s;
@@ -453,7 +471,7 @@ function runAI(state: BattleState, side: Side, content: GameContent): void {
       return { ...configured, progress: 0, capturing: null };
     }), faction: state.factions[side], enemyMemory: state.fog[side].memory,
     structures: state.structures.filter(s => s.owner === side || visibleCell(state, side, s, content)), map: mission.map, mission, plan })) as Parameters<typeof decideAI>[0];
-  const commands = decideAI(observation, content); state.ai[side] = observation.plan; state.ai[side].nextDecision = state.time + 1;
+  const commands = decideAI(observation, content); state.ai[side] = observation.plan;
   for (const command of commands) if ('side' in command && command.side === side) applyCommand(state, command, content);
 }
 export function stepBattle(state: BattleState, content: GameContent, dt: number = RULES.step): void {
