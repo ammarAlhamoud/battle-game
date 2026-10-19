@@ -16,7 +16,9 @@
     "test:campaign": "node scripts/simulate-campaign.mjs",
     "benchmark": "node --expose-gc scripts/benchmark.mjs",
     "test:tactics": "node scripts/qa-tactics.mjs",
-    "test:runtime": "node scripts/qa-runtime.mjs"
+    "test:runtime": "node scripts/qa-runtime.mjs",
+    "test:difficulty": "node scripts/qa-difficulty.mjs",
+    "test:balance": "node scripts/simulate-difficulty.mjs"
   },
   "dependencies": {
     "phaser": "3.90.0"
