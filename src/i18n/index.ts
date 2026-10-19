@@ -1,6 +1,7 @@
 import { arMessages } from './messages.js';
 import { arContent } from './content-ar.js';
 import { proMessagesAr } from './pro-messages.js';
+import { difficultyMessagesAr } from './difficulty-messages.js';
 
 export type Language = 'en' | 'ar';
 let language: Language = 'en';
@@ -97,7 +98,7 @@ const pathTerms: Record<string, string> = {
   remaining: 'المتبقي', started: 'بدء التدريب', capturing: 'جهة الاستيلاء', progress: 'التقدم', kind: 'النوع', target: 'الهدف',
   maxHp: 'الصحة القصوى', built: 'اكتمال البناء', visible: 'المرئي', explored: 'المستكشف', memory: 'الذاكرة',
   seen: 'وقت المشاهدة', nextDecision: 'القرار التالي', objective: 'الهدف', mode: 'النمط', lastKnown: 'آخر معلومات معروفة',
-  decisions: 'القرارات', text: 'النص',
+  difficulty: 'الصعوبة', aiGraceUntil: 'مهلة التجهيز', nextRecruitAt: 'موعد التجنيد', decisions: 'القرارات', text: 'النص',
 };
 function readablePath(path: string): string {
   return path.split('.').map(part => part.replace(/^([A-Za-z]+)(.*)$/, (_, key: string, suffix: string) => `${pathTerms[key] ?? 'الحقل'}${suffix}`)).join(' / ');
@@ -105,7 +106,7 @@ function readablePath(path: string): string {
 
 function arabic(source: string, depth: number): string {
   if (!source || depth > 12) return source;
-  const exact = proMessagesAr[source] ?? arMessages[source] ?? arContent[source];
+  const exact = difficultyMessagesAr[source] ?? proMessagesAr[source] ?? arMessages[source] ?? arContent[source];
   if (exact !== undefined) return exact;
   const text = source.trim();
   if (text !== source) return source.slice(0, source.indexOf(text)) + arabic(text, depth + 1) + source.slice(source.indexOf(text) + text.length);

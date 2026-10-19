@@ -1,4 +1,4 @@
-import type { BattleRenderer, BattleState, Campaign, Command, Formation, MissionDef, Order, Selection, SkillDef, TacticalTarget, Unit, UnitDef, Vec } from '../contracts';
+import type { BattleRenderer, BattleState, Campaign, Command, Difficulty, Formation, MissionDef, Order, Selection, SkillDef, TacticalTarget, Unit, UnitDef, Vec } from '../contracts';
 import type { GameUI, ResultsData, UIOptions } from '../ui-contract';
 import { createRenderer } from '../render/index';
 import { getGraphicsQuality, setGraphicsQuality, type GraphicsQuality } from '../render/quality';
@@ -15,7 +15,14 @@ import './art.css';
 import './skill-tree.css';
 import './command.css';
 import './battle-intel.css';
+import './difficulty.css';
 
+const DIFFICULTY_NAMES: Record<Difficulty, string> = { relaxed: 'Relaxed', standard: 'Standard', veteran: 'Veteran' };
+const DIFFICULTY_COPY: Record<Difficulty, string> = {
+  relaxed: 'A 90-second opening, slower recruitment and smaller enemy armies. No enemy tactical abilities.',
+  standard: 'A 30-second opening, moderate recruitment and fewer simultaneous enemy abilities.',
+  veteran: 'The original AI: immediate expansion, fast recruitment and full tactical responses.',
+};
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
 const SHORT_ERAS = ['Origins', 'Bronze', 'Classical', 'Medieval', 'Gunpowder', 'Industrial', 'Modern', 'Space'];
 const FORMATIONS: Formation[] = ['line', 'column', 'wedge', 'spread', 'shield'];
@@ -89,6 +96,7 @@ export function mountUI(options: UIOptions): GameUI {
   let top: HTMLElement | null = null;
   let contextual: HTMLElement | null = null;
   let minimap: HTMLCanvasElement | null = null;
+  let difficultyStatus: HTMLButtonElement | null = null;
   let pauseButton: HTMLButtonElement | null = null;
   let requestedPause: boolean | null = null;
   let battleRoot: HTMLElement | null = null;
@@ -105,7 +113,7 @@ export function mountUI(options: UIOptions): GameUI {
     setLanguage(language); document.documentElement.lang = language; document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
     document.title = language === 'ar' ? 'EIGHTFOLD — فن القيادة' : 'Eightfold — The Art of Command';
     localizeTree(root); localizeTree(toasts);
-    battleIntel?.relocalize();
+    battleIntel?.relocalize(); paintDifficulty();
     for (const control of root.querySelectorAll<HTMLElement>('[data-language]')) { const checked = control.dataset.language === language; control.classList.toggle('selected', checked); control.setAttribute('aria-checked', String(checked)); control.tabIndex = checked ? 0 : -1; }
     if (save) { campaign.language = language; options.onLanguageChange(language); }
   }
@@ -170,6 +178,16 @@ export function mountUI(options: UIOptions): GameUI {
     window.setTimeout(() => dialog.querySelector<HTMLElement>('button')?.focus(), 0);
     return dialog;
   }
+  function activeDifficulty(): Difficulty { return state?.difficulty ?? (savedBattle && !savedBattle.ended ? savedBattle.difficulty : undefined) ?? campaign.difficulty ?? 'veteran'; }
+  function paintDifficulty() {
+    if (!difficultyStatus) return;
+    const name = difficultyStatus.querySelector('[data-difficulty-name]');
+    const caption = difficultyStatus.querySelector('[data-difficulty-caption]');
+    if (name) setText(name, DIFFICULTY_NAMES[activeDifficulty()]);
+    if (caption) setText(caption, state && (state.aiGraceUntil ?? 0) > state.time ? 'Preparation time' : 'Change difficulty');
+    const countdown = difficultyStatus.querySelector<HTMLElement>('[data-difficulty-countdown]');
+    if (countdown) { const remaining = Math.max(0, (state?.aiGraceUntil ?? 0) - (state?.time ?? 0)); countdown.hidden = remaining <= 0; if (remaining > 0) setText(countdown, clock(Math.ceil(remaining))); }
+  }
   function settings() {
     const dialog = openModal('Settings', 'settings-modal');
     const introduction = element('div', 'settings-introduction'); append(introduction, svgIcon('globe'), element('div', '', 'Choose your language')); append(dialog, introduction);
@@ -189,6 +207,18 @@ export function mountUI(options: UIOptions): GameUI {
       append(choice, element('span', 'language-code', language === 'ar' ? 'ع' : 'Aa'), append(element('span', 'language-choice-copy'), element('strong', '', title), element('small', '', subtitle)), svgIcon('check')); append(languages, choice);
     }
     append(dialog, languages, element('p', 'settings-save-note', 'Your preference is saved automatically.'));
+    const difficultyRow = element('div', 'settings-row difficulty-row');
+    const difficulty = element('select', 'graphics-quality'); difficulty.dataset.testid = 'difficulty'; localAttribute(difficulty, 'aria-label', 'Difficulty');
+    for (const [value, name] of [['relaxed', 'Relaxed (recommended)'], ['standard', 'Standard'], ['veteran', 'Veteran']] as const) { const option = element('option', '', name); option.value = value; difficulty.append(option); }
+    difficulty.value = activeDifficulty(); difficulty.disabled = !options.onDifficultyChange || screen === 'battle' && !state;
+    const difficultyCopy = element('p', 'settings-save-note difficulty-copy', DIFFICULTY_COPY[activeDifficulty()]);
+    const difficultyFeedback = element('p', 'difficulty-feedback'); difficultyFeedback.setAttribute('role', 'status');
+    difficulty.onchange = () => {
+      const value = difficulty.value as Difficulty; difficulty.disabled = true; setText(difficultyFeedback, 'Applying difficulty…');
+      void options.onDifficultyChange?.(value).then(() => { campaign.difficulty = value; setText(difficultyCopy, DIFFICULTY_COPY[value]); setText(difficultyFeedback, 'Difficulty saved. Your progress and rewards are kept.'); paintDifficulty(); }).catch(error => { difficulty.value = activeDifficulty(); setText(difficultyFeedback, error instanceof Error ? error.message : 'That action could not be completed.'); }).finally(() => { difficulty.disabled = false; });
+    };
+    append(difficultyRow, element('span', '', 'Difficulty'), difficulty);
+    append(dialog, difficultyRow, difficultyCopy, element('p', 'settings-save-note', 'Changing to an easier mode gives 45 seconds of preparation in Relaxed, or 20 in Standard. Applies to the current saved battle and future battles.'), element('p', 'settings-save-note', 'Difficulty changes enemy decisions. Unit health, damage and costs stay the same.'), difficultyFeedback);
     const graphics = element('div', 'settings-row');
     const quality = element('select', 'graphics-quality'); localAttribute(quality, 'aria-label', 'Graphics quality'); quality.dataset.testid = 'graphics-quality';
     for (const [value, name] of [['high', 'High detail'], ['adaptive', 'Adaptive performance']] as const) { const option = element('option', '', name); option.value = value; quality.append(option); }
@@ -251,7 +281,8 @@ export function mountUI(options: UIOptions): GameUI {
     const headerActions = element('div', 'header-actions');
     const skillsButton = withIcon(button(`Civilization tree  ·  ${campaign.points} SP`, openSkills, 'knowledge-button'),'tree'); skillsButton.dataset.testid = 'skills';
     const languageControl=withIcon(button('Language',settings,'secondary language-shortcut'),'globe');languageControl.dataset.testid='language-settings';
-    append(headerActions, skillsButton,languageControl);append(head,heading,headerActions);append(page,head);
+    const difficultyShortcut = withIcon(button('Difficulty', settings, 'secondary difficulty-shortcut'), 'settings'); difficultyShortcut.dataset.testid = 'difficulty-settings'; append(difficultyShortcut, element('small', '', DIFFICULTY_NAMES[activeDifficulty()]));
+    append(headerActions, skillsButton, difficultyShortcut, languageControl);append(head,heading,headerActions);append(page,head);
     const eraHeading=element('div','era-heading');append(eraHeading,element('p','eyebrow','AGES OF CIVILIZATION'),element('span','',`${wins} / 40 BATTLES WON`));append(page,eraHeading);
     const tabs = element('nav', 'era-tabs'); localAttribute(tabs, 'aria-label', 'Civilization eras');
     content.eras.forEach((era, index) => {
@@ -332,7 +363,12 @@ export function mountUI(options: UIOptions): GameUI {
     const planning=element('div','pause-indicator');append(planning,svgIcon('pause'),label('TACTICAL PAUSE · PLAN FREELY'));planning.hidden=true;
     const mapControls=element('div','map-controls');append(mapControls,withIcon(button('',selectHome,'map-control','Main stronghold'),'home'),withIcon(button('',()=>{if(!state)return;selection={units:state.units.filter(unit=>unit.owner===0).map(unit=>unit.id),stronghold:null};renderer?.setSelection(selection);panelFingerprint='';renderContext();},'map-control','Select all soldiers'),'select'),withIcon(button('',help,'map-control','Battle controls'),'guide'));
     battleIntel = createBattleIntel(content, found, source => getLanguage() === 'ar' ? BATTLE_INTEL_AR[source] ?? translate(source) : source, point => renderer?.focus(point.x, point.y));
-    append(viewport,planning,mapControls,battleIntel.element);append(battleRoot, top, viewport, contextual, minimapWrap); append(root, battleRoot);
+    difficultyStatus = button('', settings, 'difficulty-status', 'Change difficulty'); difficultyStatus.dataset.testid = 'difficulty-status';
+    const difficultyName = element('strong'); difficultyName.dataset.difficultyName = '';
+    const difficultyCaption = element('span'); difficultyCaption.dataset.difficultyCaption = '';
+    const difficultyCountdown = element('time'); difficultyCountdown.dataset.difficultyCountdown = ''; difficultyCountdown.hidden = true;
+    append(difficultyStatus, svgIcon('settings'), difficultyName, difficultyCaption, difficultyCountdown); paintDifficulty();
+    append(viewport,planning,mapControls,battleIntel.element,difficultyStatus);append(battleRoot, top, viewport, contextual, minimapWrap); append(root, battleRoot);
     renderer = createRenderer({ parent: viewport, content, mission: found, onSelect: (incoming, additive) => {
       selection = { units: additive ? [...new Set([...selection.units, ...incoming.units])] : incoming.units, stronghold: incoming.stronghold };
       if (selection.stronghold) selection.units = [];
@@ -385,7 +421,7 @@ export function mountUI(options: UIOptions): GameUI {
     else if (first && tutorialOpen && tutorialOwnsPause && !next.paused) requestPause(true);
     if (targetMode && targetMode.kind === 'attack' && !next.units.some(u => u.owner === 0 && targetMode!.ids.includes(u.id))) cancelTarget();
     selection.units = selection.units.filter(id => next.units.some(unit => unit.id === id && unit.owner === 0));
-    renderer?.setState(next); renderer?.setSelection(selection); battleIntel?.update(next);
+    renderer?.setState(next); renderer?.setSelection(selection); battleIntel?.update(next); paintDifficulty();
     const values: Record<string, string> = { supplies: number(next.factions[0].resources), army: `${usage(next, 0, content)} / ${capacity(next, 0, content)}`, score: number(next.factions[0].score), time: clock(next.time) };
     for (const [key, value] of Object.entries(values)) { const item = top?.querySelector(`[data-stat="${key}"] strong`); if (item) setText(item, value); }
     paintPause(requestedPause ?? next.paused);
