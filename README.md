@@ -22,6 +22,12 @@ English and Arabic are available from **Settings → Language**, including durin
 
 ![واجهة الحملة بالعربية](docs/screenshots/campaign-ar.png)
 
+## مستوى الصعوبة
+
+إذا كانت الجولات صعبة، اختر **الإعدادات ← الصعوبة ← مريح (موصى به)**، من الحملة أو أثناء المعركة. يمنح الوضع المريح 90 ثانية تجهيز في المعارك الجديدة، أو 45 ثانية عند تخفيف صعوبة معركة محفوظة، مع تجنيد أبطأ وجيش خصم أصغر. يتوقف عدّاد التجهيز أثناء الإيقاف التكتيكي، ويظهر في الميدان. يحتفظ التغيير بالتقدم والجيش والموارد والمكافآت.
+
+Fresh campaigns default to **Relaxed**. **Standard** offers a shorter opening and more active tactics; **Veteran** retains the original opponent. Existing saves keep Veteran until explicitly changed. Difficulty changes decisions and tempo, while combat statistics, costs and reward rules remain identical. See the [difficulty guide and measured results](docs/DIFFICULTY.md).
+
 ## Build and deploy
 
 ```sh
@@ -83,6 +89,8 @@ npm run build
 ```
 
 With the development server running, `npm run test:tactics` exercises direct targeting, real construction, Arabic dossiers and rapid pause input; `npm run test:runtime` checks worker failure recovery and save races. GitHub Actions runs the deterministic tests and production build on pushes and pull requests. See the [professionalization review and Arabic gallery](docs/PROFESSIONAL_REVIEW_AR.md) for before/after evidence and remaining limits.
+
+After `npm test`, use `npm run test:difficulty` with the development server running to check bilingual settings, live changes and legacy saves. `npm run test:balance` runs a simple player policy through the first five missions at all three difficulty levels; it does not require a browser.
 
 The automated suites use Node's test runner against the same TypeScript simulation and content used in the browser. Browser and performance instructions and actual measurements are recorded in [verification](docs/VERIFICATION.md).
 

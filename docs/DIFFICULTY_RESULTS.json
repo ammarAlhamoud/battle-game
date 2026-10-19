@@ -1,0 +1,263 @@
+{
+  "reviewDate": "2026-10-19",
+  "featureCommit": "7df4fec",
+  "verificationScriptsCommit": "f169186",
+  "scope": "Difficulty profiles, bilingual settings, live changes, legacy saves, first-era novice policy; no claim about human win rates or later-era balance.",
+  "node": {
+    "passed": 103,
+    "failed": 0,
+    "skipped": 0
+  },
+  "productionBuild": "passed",
+  "difficultyBrowser": {
+    "timestamp": "2026-10-19T15:53:52.751Z",
+    "browser": "154.0.8037.57",
+    "checks": [
+      "fresh campaigns default to Relaxed and all three English settings persist without changing progression",
+      "Arabic labels and stable mode codes persist across reload while campaign records and skill points remain intact",
+      "easier live switches preserve full player state, both economies, score, production, fog and rewards while replacing enemy attack plans and granting 20/45 simulation seconds",
+      "reloading and resuming retain the exact paused battle, mode and remaining preparation deadline",
+      "explicit Veteran remains selected after a harder live switch and reload without resetting the army or campaign",
+      "legacy version-one imports remain Veteran and preserve old unit, resource and reward data",
+      "changing difficulty for an unfinished saved battle applies before resume and does not create a new mission or restart its grace",
+      "explicit Veteran portable saves retain their chosen mode and the existing one-time threshold reward ledger"
+    ],
+    "errors": [],
+    "snapshots": [
+      {
+        "phase": "live-relaxed",
+        "time": 120,
+        "preparationDeadline": 165,
+        "score": 310
+      }
+    ]
+  },
+  "localizationBrowser": {
+    "timestamp": "2026-10-19T15:56:49.584Z",
+    "browser": "154.0.8037.57",
+    "checks": [
+      "Arabic changes the complete campaign immediately and preserves numeric fraction order",
+      "RTL campaign has no horizontal overflow at 1440,1100,768 and375 pixels",
+      "Arabic mission briefings, skill tree and keyboard-accessible settings render correctly",
+      "language persists across reload and English can be restored from settings",
+      "switching language and graphics quality during a paused battle preserves units,orders,queues,resources,fog,AI and rewards exactly",
+      "Arabic recruitment,selection and tactical command queues remain functional after language changes",
+      "Arabic defeat/results and campaign reward flow work",
+      "all reviewed screens have complete translations and no JavaScript errors"
+    ],
+    "errors": [],
+    "missingTranslations": [],
+    "viewports": [
+      1440,
+      1100,
+      768,
+      375
+    ]
+  },
+  "productionBrowser": {
+    "timestamp": "2026-10-19T15:57:54.855Z",
+    "browser": "154.0.8037.57",
+    "checks": [
+      "campaign has eight era tabs, five cards, and sequential locks",
+      "branching skills purchase with prerequisite and point accounting",
+      "all eras and their five mission identities can be inspected",
+      "real WebGL battle starts and tactical pause freezes simulation; skill capacity applies",
+      "recruitment consumes finite supplies, freezes while paused, then trains and deploys",
+      "drag selection, control groups, advanced formation and editable ordered plans work during pause",
+      "minimap issues real orders and the selected army gradually captures an outpost",
+      "complete portable export and browser reload restore the active battle",
+      "all eight eras and Arabic fonts cache successfully; a fresh offline reload restores the Arabic game and Worker",
+      "validated real-simulation near-result fixture finishes in Worker and awards campaign progression",
+      "victory unlocks the next mission, preserves replay and does not duplicate rewards"
+    ],
+    "pageErrors": [],
+    "viewport": [
+      1440,
+      1000
+    ]
+  },
+  "noviceBalance": {
+    "generatedAt": "2026-10-19T15:51:49.303Z",
+    "fixedStep": 0.1,
+    "maximumSeconds": 900,
+    "policy": "Every 5 simulation seconds, recruit a fixed two-frontline/one-ranged cycle and send one army to the nearest known non-player subsidiary, then the enemy main. Reissue only for a changed objective or a new/idle soldier. No ability, formation or counter micro; only legitimately visible ownership and the public authored map.",
+    "skills": [
+      "discipline",
+      "logistics"
+    ],
+    "initialSkillPointsSpent": 3,
+    "scope": "Independent first-era missions, using only the initial skill budget; later campaign upgrades are deliberately excluded. Results measure this policy, not human success rates.",
+    "summaries": [
+      {
+        "difficulty": "relaxed",
+        "tested": 5,
+        "playerWins": 5,
+        "playerLosses": 0,
+        "timeLimits": 0,
+        "totalWallMilliseconds": 8063
+      },
+      {
+        "difficulty": "standard",
+        "tested": 5,
+        "playerWins": 5,
+        "playerLosses": 0,
+        "timeLimits": 0,
+        "totalWallMilliseconds": 13035
+      },
+      {
+        "difficulty": "veteran",
+        "tested": 5,
+        "playerWins": 2,
+        "playerLosses": 3,
+        "timeLimits": 0,
+        "totalWallMilliseconds": 13905
+      }
+    ],
+    "runs": [
+      {
+        "mission": "e1m1",
+        "difficulty": "relaxed",
+        "outcome": "player-victory",
+        "simulationSeconds": 47.8,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m2",
+        "difficulty": "relaxed",
+        "outcome": "player-victory",
+        "simulationSeconds": 58.6,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m3",
+        "difficulty": "relaxed",
+        "outcome": "player-victory",
+        "simulationSeconds": 63.2,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m4",
+        "difficulty": "relaxed",
+        "outcome": "player-victory",
+        "simulationSeconds": 68.9,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m5",
+        "difficulty": "relaxed",
+        "outcome": "player-victory",
+        "simulationSeconds": 64.3,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m1",
+        "difficulty": "standard",
+        "outcome": "player-victory",
+        "simulationSeconds": 71.6,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m2",
+        "difficulty": "standard",
+        "outcome": "player-victory",
+        "simulationSeconds": 73.9,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m3",
+        "difficulty": "standard",
+        "outcome": "player-victory",
+        "simulationSeconds": 146.5,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m4",
+        "difficulty": "standard",
+        "outcome": "player-victory",
+        "simulationSeconds": 123.7,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m5",
+        "difficulty": "standard",
+        "outcome": "player-victory",
+        "simulationSeconds": 87.4,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m1",
+        "difficulty": "veteran",
+        "outcome": "player-defeat",
+        "simulationSeconds": 65,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m2",
+        "difficulty": "veteran",
+        "outcome": "player-defeat",
+        "simulationSeconds": 105.5,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m3",
+        "difficulty": "veteran",
+        "outcome": "player-victory",
+        "simulationSeconds": 201.3,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m4",
+        "difficulty": "veteran",
+        "outcome": "player-defeat",
+        "simulationSeconds": 126.7,
+        "finiteEconomyVerified": true
+      },
+      {
+        "mission": "e1m5",
+        "difficulty": "veteran",
+        "outcome": "player-victory",
+        "simulationSeconds": 87.2,
+        "finiteEconomyVerified": true
+      }
+    ]
+  },
+  "firstMissionWithoutSkills": {
+    "generatedAt": "2026-10-19T15:54:56.182Z",
+    "skills": [],
+    "initialSkillPointsSpent": 0,
+    "runs": [
+      {
+        "mission": "e1m1",
+        "difficulty": "relaxed",
+        "ended": true,
+        "winner": 0,
+        "outcome": "player-victory",
+        "simulationSeconds": 47.8,
+        "wallMilliseconds": 913,
+        "peakUnits": 17,
+        "remaining": [
+          11,
+          1
+        ],
+        "resources": [
+          452,
+          292
+        ],
+        "scores": [
+          4070,
+          295
+        ],
+        "kills": [
+          7,
+          2
+        ],
+        "firstCaptures": [
+          4,
+          0
+        ],
+        "enemyDecisions": 16,
+        "finiteEconomyVerified": true
+      }
+    ]
+  }
+}

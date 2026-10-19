@@ -1,13 +1,17 @@
-# Verification — 18 October 2026
+# Verification — 19 October 2026
 
 These are observed results from the implementation environment. The specification records requested behavior; this report records checks actually run and their practical limits.
+
+On 19 October, the complete Node suite, production build, bilingual scenario and production/offline scenario passed again after the difficulty update. The new difficulty browser scenario and fifteen first-era balance runs also passed. Tactical, Worker/session, art and full-campaign results below are retained from the 18 October review; those broader matrices were not rerun for this update.
 
 ## Completed checks
 
 | Check | Observed result |
 |---|---|
 | TypeScript / production build | Passed; Vite emits the application, simulation Worker and versioned offline cache. |
-| Node test suite | 85 passed, zero failed or skipped. Content, simulation, navigation, fair AI, economy, production, captures, progression, save validation and localization are exercised. |
+| Node test suite | 103 passed, zero failed or skipped. Includes 11 difficulty-policy and 7 difficulty/save regressions alongside content, simulation, navigation, fair AI, economy, production, captures, progression, save validation and localization. |
+| Difficulty browser scenario | 8 checks passed in Chromium 154; zero page errors. English/Arabic preferences, live and saved-only changes, exact paused continuation, legacy imports and one-time rewards are covered. |
+| Novice-policy difficulty comparison | 15 first-era runs ended naturally with balanced finite-resource ledgers. The same simple policy won 5/5 Relaxed, 5/5 Standard and 2/5 Veteran. This is a deterministic policy comparison, not a human win-rate estimate. |
 | Production browser scenario | 11 checks passed in Chromium 154.0.8037.57; zero JavaScript page errors. |
 | Tactical interaction scenario | 8 checks passed: initial/rapid pause, attack-move, invalid-target cancellation, retargeted recon, actual engineering, specialist dossiers, Arabic compact controls and saved-attempt replacement. |
 | Worker/session regression | 8 real Chromium controller/Worker scenarios passed; zero page errors. Snapshot causality, failed imports, stale results, respec, constructor failure and module-load recovery are covered. |
@@ -61,6 +65,8 @@ npm run test:storage
 npm run test:localization
 npm run test:tactics
 npm run test:runtime
+npm run test:difficulty
+npm run test:balance
 npm run test:art
 node scripts/simulate-campaign.mjs --mission=e1m1 --basic-skills
 npm run test:browser
@@ -69,6 +75,8 @@ npm run test:browser
 The fixture-generation step creates `test-results/late-victory.json`, required by the production scenario. The storage and localization scripts use the development server; the production scenario uses the preview server. Browser scripts use fresh isolated contexts, keeping their corruption/import experiments away from an existing player's saves. Set `CHROMIUM_PATH` when Chromium is installed elsewhere. The gameplay and localization scripts also accept `GAME_URL`; retain the default development URL for the browser's missing-translation instrumentation.
 
 Browser reports and screenshots are written under ignored `test-results/`. Representative images are retained in [screenshots](screenshots/): [Arabic campaign](screenshots/campaign-ar.png) and [Arabic battle](screenshots/battle-ar.png).
+
+The [difficulty guide](DIFFICULTY.md) retains the preparation rules and new Arabic screenshots. [DIFFICULTY_RESULTS.json](DIFFICULTY_RESULTS.json) preserves the compact measured comparison, the zero-purchased-skill first-mission result and browser regression counts.
 
 The art matrix writes native contact sheets, eight scene screenshots and `report.json` under ignored `.cache/qa-art/`. Its revealed terrain and synthetic armies exist only in the disposable test harness and do not unlock content or change a player's saves. The [art gallery](ART_DIRECTION.md) includes retained examples.
 

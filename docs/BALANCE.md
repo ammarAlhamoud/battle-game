@@ -1,5 +1,17 @@
 # Measured simulation checks
 
+## Difficulty update — 19 October 2026
+
+The original opponent is now named **Veteran**. Fresh campaigns use **Relaxed**; existing saves retain their original behavior until the player chooses otherwise. The tables below remain historical Veteran-versus-Veteran subsystem measurements.
+
+The new `npm run test:balance` comparison uses a deliberately simple player policy against each opponent profile: every five simulation seconds, recruit a fixed two-frontline/one-ranged cycle and send one army to the nearest known outpost, then the enemy main. It uses the legal initial three-point skill budget, no abilities, formations, counter selection or combat micro, and only legitimately visible ownership. The same policy wins **5/5 Relaxed**, **5/5 Standard** and **2/5 Veteran** first-era missions. All fifteen end naturally and preserve both finite-resource ledgers. The first Relaxed mission also ends in victory at 47.8 simulated seconds with **zero purchased skills**.
+
+Relaxed grants a 90-second opening, recruits at most once per 12 seconds and avoids flanking, scouting, construction and activated abilities. Standard grants 30 seconds and recruits at most once per four seconds with a restricted tactical policy. Reduced projected-army targets include deployed soldiers, queues and reserves; the starting army is never deleted. Combat values, supply sources, costs and reward thresholds are unchanged. An invaded enemy still fights normally during preparation.
+
+See the [difficulty guide](DIFFICULTY.md) and [retained results](DIFFICULTY_RESULTS.json) for exact live-switch behavior and the per-mission comparison. These deterministic first-era checks demonstrate an easier opening and a viable simple strategy; they do not establish human success rates or exhaustively balance later eras.
+
+## Original symmetric simulation methodology
+
 The headless runner uses the production engine, actual authored campaign maps, the normal command interface and the same observation-filtered AI for both factions. Neither side receives extra resources, statistics, sight or recruitment privileges. The fixed timestep is 0.1 seconds; each run has a 6,000-tick / 600-second cap.
 
 Run after `npm test`:
