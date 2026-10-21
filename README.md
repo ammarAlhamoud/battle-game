@@ -2,12 +2,19 @@
 
 A single-player, silent, isometric real-time strategy game spanning eight ages of civilization and forty tactical fields. The opponent runs locally. No account, backend, paid service, remote font, or AI API is required.
 
+## Engineering overview
+
+This project demonstrates a deterministic simulation separated from rendering, typed Worker messages, observation-limited opponent decisions, and validated save/restore behavior. Start with the [engineering case study](docs/ENGINEERING_CASE_STUDY.md) for a guided code review.
+
+The opponent uses local decision rules and utility scoring; no LLM is involved at runtime. The [implementation registry](docs/IMPLEMENTATION.md) records AI-agent implementation roles. It does not imply that every component was manually authored.
+
 ## Run
 
 Use Node.js 22.12 or newer (validated with Node 24.19) and npm.
 
 ```sh
-cd /workspace/battle-game
+git clone https://github.com/ammarAlhamoud/battle-game.git
+cd battle-game
 npm ci
 npm run dev
 ```
