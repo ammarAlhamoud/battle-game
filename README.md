@@ -8,6 +8,8 @@ This project demonstrates a deterministic simulation separated from rendering, t
 
 The opponent uses local decision rules and utility scoring; no LLM is involved at runtime. The [implementation registry](docs/IMPLEMENTATION.md) records AI-agent implementation roles. It does not imply that every component was manually authored.
 
+For a quick presentation, follow the [45-second demo walkthrough](docs/DEMO.md).
+
 ## Run
 
 Use Node.js 22.12 or newer (validated with Node 24.19) and npm.
