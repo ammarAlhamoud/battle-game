@@ -9,7 +9,7 @@ Use the production build (`npm run build`, then `npm run preview`) in a fresh br
 3. **Civilization (3 seconds):** open the skill tree, then close it with Escape.
 4. **Battle (5 seconds):** begin the first mission and dismiss the tutorial if shown. Use Relaxed difficulty.
 5. **Tactical pause and training (10 seconds):** pause, press H to select the stronghold, queue a frontline unit, then resume. Supplies decrease and the unit joins the army after training.
-6. **Command (10 seconds):** pause, drag-select the army, choose Spread, then right-click an outpost on the minimap. Resume to show the units following the command.
+6. **Command (10 seconds):** pause, choose Select all soldiers, choose Column, then right-click an outpost on the minimap. Resume to show the units following the command.
 7. **Save (4 seconds):** open the battle menu, choose Save now and close the menu.
 
 ## Engineering talking points
