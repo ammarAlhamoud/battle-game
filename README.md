@@ -13,8 +13,8 @@ The opponent uses local decision rules and utility scoring; no LLM is involved a
 Use Node.js 22.12 or newer (validated with Node 24.19) and npm.
 
 ```sh
-git clone https://github.com/ammarAlhamoud/battle-game.git
-cd battle-game
+git clone https://github.com/ammarAlhamoud/eightfold-rts.git
+cd eightfold-rts
 npm ci
 npm run dev
 ```
